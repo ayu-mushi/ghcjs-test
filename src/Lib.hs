@@ -79,11 +79,15 @@ doSth = do
 
 initialHtml :: Html
 initialHtml = [shamlet|
-<canvas #canvas>
-<input #in>
-<p #out>
-<p #mouse>
-<p #p_key>
+<div>
+  <a href="https://github.com/ayu-mushi/ghcjs-test">source code of this "ghcjs test"
+
+<div>
+  <canvas #canvas>
+  <input #in>
+  <p #out>
+  <p #mouse>
+  <p #p_key>
 |]
 
 showJS :: Show a => a -> JSString
@@ -146,10 +150,10 @@ myWidget = do
   t <- textInput def
   el "div" $ dynText $ _textInput_value t
   el "div" $ do
-    text . Text.pack "Last keypressed: "
+    text "Last keypressed: "
     (holdDyn "None" $ show <$> _textInput_keypress t) >>= display
   rec
-    (e, _) <- elAttr' "div" (fromList [("style", "color: red")]) $ (text $ pack ("[Click Here]: ")) >> clicker e
+    (e, _) <- elAttr' "div" (fromList [("style", "color: red")]) $ (text ("[Click Here]: ")) >> clicker e
   el "div" $ do
     ct <- liftIO getCurrentTime
     (tick::Event t TickInfo) <- tickLossy 1 ct
@@ -190,7 +194,7 @@ htmlInputElem = HTMLInputElement . unElement
 -- Cookie Clicker, TVar
 
 myMain :: IO ()
-myMain = (mainWidget myWidget) {- reflex part -} >> (do {- normal part -}
+myMain = (>>) (mainWidget myWidget) {- reflex part -} $ do {- normal part -}
   (window::DOMTypes.Window) <- currentWindowUnchecked
   doc <- currentDocumentUnchecked
   Just (body::Element) <- fmap toElement <$> getBody doc
@@ -203,6 +207,7 @@ myMain = (mainWidget myWidget) {- reflex part -} >> (do {- normal part -}
 
   mouseVar <- newEmptyMVar
   forkIO $ watchMouse mouseVar canvas
+  setInnerHTML mouse $ Just ("See also console"::String)
   watchMouseTh <- forkIO $ forM_ (reverse [0..99]) $ \n -> do
     setInnerHTML mouse $ (Nothing :: Maybe String)
     setInnerHTML mouse $ Just ("mouse is not moving"::String)
@@ -244,4 +249,4 @@ myMain = (mainWidget myWidget) {- reflex part -} >> (do {- normal part -}
     threadDelay $ 5 * 10^5
   u' <- doSth
   when u' $ killThread w'
-  return ())
+  return ()
