@@ -94,7 +94,8 @@ extra-deps:
   - dlist-0.7.1.2
   - MemoTrie-0.6.8
   - newtype-generics-0.5.1
-
+  - aeson-0.11.3.0
+  - these-0.7.3
 
 # Override default flag values for local packages and extra-deps
 flags: {}

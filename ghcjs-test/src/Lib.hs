@@ -34,9 +34,9 @@ import Data.JSString.Text (lazyTextToJSString)
 import JavaScript.JQuery (append, selectElement, select)
 import Reflex.Dom as Reflex
   (mainWidget, text, el, elAttr, el', elAttr', MonadWidget, textInput, TextInput(..), dynText, def,
-  holdDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
+  holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
   RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, foldDynM, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
-  sample, PushM, Reflex, gate)
+  sample, PushM, Reflex, updated, gate, DomBuilder)
 import Control.Lens ((&), (.~))
 import Data.Map (fromList)
 import Text.Hamlet (shamlet)
@@ -45,8 +45,6 @@ import Text.Blaze.Html (Html)
 import Data.Text.Internal (Text)
 import qualified Data.Text as Text(pack)
 import Web.KeyCode (Key(..))
-import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import Data.Monoid ()
 import Control.Monad.STM (retry, atomically)
 import Control.Concurrent.STM (newTVar, readTVar, writeTVar, modifyTVar)
 
@@ -144,6 +142,11 @@ data Player = Player {
 , isPoison :: Bool
   }
 
+buttonDyn :: (DomBuilder t m, MonadWidget t m) => Dynamic t Text -> m (Event t ())
+buttonDyn t = do
+  (e, _) <- el' "button" $ dynText t
+  return $ domEvent Click e
+
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
   el "div" $ text $ Text.pack "Welcome to Reflex"
@@ -167,12 +170,17 @@ myWidget = do
     let cookie = foldl1 (zipDynWith (+)) [sumcookie, allgrandma]
     display cookie
 
-    grandma_button <- button "buy grandma ($20 cookie)"
-    (grandma::Dynamic t Int) <- foldDynM (buy 20 cookie) 0 grandma_button
+    grandma_price <- foldDyn (\_ n -> n + (n`div`10)) 20 (updated uniq_grandma)
+    grandma_button <- buttonDyn $ fmap (Text.pack . ("buy grandma ($"++) . (++" cookies)") . show) grandma_price
+    (grandma::Dynamic t Int) <- foldDynM (\() n -> do price <- sample $ current grandma_price; buy price cookie () n) 0 grandma_button
 
-    let consumgrandma = fmap (* (-20)) grandma
-    (sumgrandma::Dynamic t Int) <- sumGrandma grandma
-    let allgrandma = zipDynWith (+) consumgrandma sumgrandma
+    (uniq_grandma::Dynamic t Int) <- holdUniqDyn grandma
+    (consumgrandma::Dynamic t Int) <- foldDyn (+) 0
+                                        $ fmap (* (-1))
+                                          $ tag (current grandma_price)
+                                            $ updated uniq_grandma
+    (sumgrandma::Dynamic t Int) <- commodity grandma (const :: Int -> NominalDiffTime -> Int) 1
+    let allgrandma = zipDynWith (+) sumgrandma consumgrandma
 
     display grandma
     -- 減価償却費
@@ -188,13 +196,13 @@ myWidget = do
       dynText $ Text.pack . (\x -> ("鈍感 ["++show x++"]"::String)) <$> d
       (d'::Dynamic t Int) <- foldDyn (const(+1)) 0 $ domEvent Click e
       dynText $ Text.pack . (\x -> ("敏感 ["++show x++"]"::String)) <$> d'
-    sumGrandma :: (MonadWidget t m) => Dynamic t Int -> m (Dynamic t Int)
-    sumGrandma g = do
+    commodity :: (MonadWidget t m) => Dynamic t Int -> (Int -> NominalDiffTime -> Int) -> NominalDiffTime -> m (Dynamic t Int)
+    commodity order ability interval = do
       ct <- liftIO getCurrentTime
-      (tick::Event t TickInfo) <- tickLossy 1 ct
-      let (grandma_occur::Event t Int) = attachPromptlyDynWith const g tick
-      grandma_dyn <- foldDyn (+) 0 grandma_occur
-      return grandma_dyn
+      (tick::Event t TickInfo) <- tickLossy interval ct
+      let (product::Event t Int) = attachPromptlyDynWith (\n t -> ability n $ _tickInfo_alreadyElapsed t) order tick
+      totalproduct <- foldDyn (+) 0 product
+      return totalproduct
     buy :: (Reflex t) => Int -> Dynamic t Int -> () -> Int -> PushM t Int
     buy price cookie () n = do
       nowcok <- sample $ current cookie
