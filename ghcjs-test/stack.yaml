@@ -92,6 +92,9 @@ extra-deps:
   - zenc-0.1.1
   - ghcjs-dom-jsffi-0.8.0.0
   - dlist-0.7.1.2
+  - MemoTrie-0.6.8
+  - newtype-generics-0.5.1
+
 
 # Override default flag values for local packages and extra-deps
 flags: {}

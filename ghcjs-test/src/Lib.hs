@@ -17,7 +17,7 @@ import GHCJS.DOM.NonElementParentNode (getElementByIdUnchecked)
 import GHCJS.DOM.Node (insertBefore)
 import GHCJS.DOM.Element (setInnerHTML)
 import Control.Concurrent
-       (tryTakeMVar, takeMVar, readMVar, newMVar, MVar, swapMVar, threadDelay, putMVar, forkIO, newEmptyMVar, forkIOWithUnmask, killThread, isEmptyMVar, ThreadId)
+       (tryTakeMVar, takeMVar, readMVar, newMVar, MVar, swapMVar, threadDelay, putMVar, forkIO, newEmptyMVar, forkIOWithUnmask, killThread, isEmptyMVar, ThreadId, modifyMVar, modifyMVar_)
 import GHCJS.Concurrent (OnBlocked(..))
 import GHCJS.DOM.Types as DOMTypes (Element(unElement), castTo, ToJSString, HTMLInputElement(HTMLInputElement), Window, toElement)
 import GHCJS.Types (JSString, JSVal)
@@ -35,9 +35,8 @@ import JavaScript.JQuery (append, selectElement, select)
 import Reflex.Dom as Reflex
   (mainWidget, text, el, elAttr, el', elAttr', MonadWidget, textInput, TextInput(..), dynText, def,
   holdDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
-  RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, foldDynM)
-import qualified Diagrams.Prelude as Diagrams (circle, lc, lwL, (#), blue)
-import Diagrams.Backend.Reflex as Diagrams (reflexDia, diaMousedownEv)
+  RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, foldDynM, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
+  sample, PushM, Reflex, gate)
 import Control.Lens ((&), (.~))
 import Data.Map (fromList)
 import Text.Hamlet (shamlet)
@@ -47,7 +46,7 @@ import Data.Text.Internal (Text)
 import qualified Data.Text as Text(pack)
 import Web.KeyCode (Key(..))
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import Data.Monoid (getAny)
+import Data.Monoid ()
 import Control.Monad.STM (retry, atomically)
 import Control.Concurrent.STM (newTVar, readTVar, writeTVar, modifyTVar)
 
@@ -81,6 +80,7 @@ initialHtml :: Html
 initialHtml = [shamlet|
 <div>
   <a href="https://github.com/ayu-mushi/ghcjs-test">source code of this "ghcjs test"
+  <p>See also console!
 
 <div>
   <canvas #canvas>
@@ -161,13 +161,23 @@ myWidget = do
       & fmap (fmap show)
       >>= display
 
-  cookie_click <- button "get cookie"
-  grandma_button <- button "buy grandma"
-
   rec
-    (cookie::Dynamic t Int) <- foldDyn (\_ n -> n + 1) 0 cookie_click
-    --(grandma::Dynamic t Int) <- foldDynM grandma 0 grandma_button
-    display $ cookie
+    cookie_click <- button "get cookie"
+    (sumcookie::Dynamic t Int) <- count cookie_click
+    let cookie = foldl1 (zipDynWith (+)) [sumcookie, allgrandma]
+    display cookie
+
+    grandma_button <- button "buy grandma ($20 cookie)"
+    (grandma::Dynamic t Int) <- foldDynM (buy 20 cookie) 0 grandma_button
+
+    let consumgrandma = fmap (* (-20)) grandma
+    (sumgrandma::Dynamic t Int) <- sumGrandma grandma
+    let allgrandma = zipDynWith (+) consumgrandma sumgrandma
+
+    display grandma
+    -- 減価償却費
+    -- 借金、リスク
+
   return ()
 
   where
@@ -178,12 +188,26 @@ myWidget = do
       dynText $ Text.pack . (\x -> ("鈍感 ["++show x++"]"::String)) <$> d
       (d'::Dynamic t Int) <- foldDyn (const(+1)) 0 $ domEvent Click e
       dynText $ Text.pack . (\x -> ("敏感 ["++show x++"]"::String)) <$> d'
-    grandma :: (MonadWidget t m) => Int -> Int -> m (Dynamic t Int)
-    grandma n m = do
+    sumGrandma :: (MonadWidget t m) => Dynamic t Int -> m (Dynamic t Int)
+    sumGrandma g = do
       ct <- liftIO getCurrentTime
-      t <- tickLossy 1 ct
-      (tick::Dynamic t Int) <- foldDyn (const(+1)) 0 t
-      return tick
+      (tick::Event t TickInfo) <- tickLossy 1 ct
+      let (grandma_occur::Event t Int) = attachPromptlyDynWith const g tick
+      grandma_dyn <- foldDyn (+) 0 grandma_occur
+      return grandma_dyn
+    buy :: (Reflex t) => Int -> Dynamic t Int -> () -> Int -> PushM t Int
+    buy price cookie () n = do
+      nowcok <- sample $ current cookie
+      if nowcok < price then
+        return n
+      else
+        return $ n + 1
+
+
+data CommoditySpec = CommoditySpec
+  { price :: Int
+  , interval :: NominalDiffTime
+  , power :: Int}
 
 htmlInputElem :: Element -> HTMLInputElement
 htmlInputElem = HTMLInputElement . unElement
@@ -194,7 +218,10 @@ htmlInputElem = HTMLInputElement . unElement
 -- Cookie Clicker, TVar
 
 myMain :: IO ()
-myMain = (>>) (mainWidget myWidget) {- reflex part -} $ do {- normal part -}
+myMain = do {- reflex part -}
+  mainWidget myWidget
+
+  {- normal part -}
   (window::DOMTypes.Window) <- currentWindowUnchecked
   doc <- currentDocumentUnchecked
   Just (body::Element) <- fmap toElement <$> getBody doc
