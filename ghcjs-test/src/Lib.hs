@@ -160,21 +160,18 @@ myWidget = do
   el "div" $ do
     ct <- liftIO getCurrentTime
     (tick::Event t TickInfo) <- tickLossy 1 ct
-    (holdDyn (0, ct) $ (\t -> (_tickInfo_n t, _tickInfo_lastUTC t)) <$> tick)
-      & fmap (fmap show)
-      >>= display
+    (holdDyn (0, ct) $ (\t -> (_tickInfo_n t, _tickInfo_lastUTC t)) <$> tick) & fmap (fmap $ Text.pack . show) >>= dynText
 
     return ()
 
   rec
     cookie_click <- button "get cookie"
-    (sumcookie::Dynamic t Int) <- count cookie_click
-    let cookie = foldl1 (zipDynWith (+)) [sumcookie, profit_grandma, profit_factory]
+    cookie <- count cookie_click >>= \sumcookie -> return $ foldl1 (zipDynWith (+)) [sumcookie, profit_grandma, profit_factory]
     display cookie
 
     grandma_button <- buttonDyn $ fmap (\pri -> Text.pack ("buy grandma ($"++ show pri ++" cookies)")) grandma_price
 
-    grandma_price <- foldDyn (\_ n -> n + (n`div`10)) 20 (updated uniq_grandma)
+    let grandma_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) uniq_grandma
     uniq_grandma <- buyDyn grandma_price cookie grandma_button
     profit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
 
@@ -183,10 +180,11 @@ myWidget = do
 
     -- 減価償却費
     -- 借金、リスク
+    -- 破産
 
     factory_button <- buttonDyn $ fmap (\pri -> Text.pack ("buy factory ($"++ show pri ++" cookies)")) factory_price
 
-    factory_price <- foldDyn (\_ n -> n + (n`div`10)) 50 (updated uniq_factory)
+    let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
     uniq_factory <- buyDyn factory_price cookie factory_button
     profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
 
@@ -194,19 +192,22 @@ myWidget = do
     dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_factory
 
   return ()
+    where
+      clicker :: (MonadWidget t m) => El t -> m ()
+      clicker e = do
+        deleyed <- delay 0.1 $ domEvent Click e
+        (d::Dynamic t Int) <- count deleyed
+        dynText $ Text.pack . (\x -> ("鈍感 ["++show x++"]"::String)) <$> d
+        (d'::Dynamic t Int) <- foldDyn (const(+1)) 0 $ domEvent Click e
+        dynText $ Text.pack . (\x -> ("敏感 ["++show x++"]"::String)) <$> d'
+
 
 type Price = Int
+type Ability = Int -> NominalDiffTime -> Price
 type Amount t = Dynamic t Int -- クッキー、おばあさん、工場などの数を表すDynamicだが、値段などは含まない
+-- 値段もクッキーだけど。
 
-clicker :: (MonadWidget t m) => El t -> m ()
-clicker e = do
-  deleyed <- delay 0.1 $ domEvent Click e
-  (d::Dynamic t Int) <- count deleyed
-  dynText $ Text.pack . (\x -> ("鈍感 ["++show x++"]"::String)) <$> d
-  (d'::Dynamic t Int) <- foldDyn (const(+1)) 0 $ domEvent Click e
-  dynText $ Text.pack . (\x -> ("敏感 ["++show x++"]"::String)) <$> d'
-
-work :: (MonadWidget t m) => Amount t -> (Int -> NominalDiffTime -> Price) -> NominalDiffTime -> m (Dynamic t Price)
+work :: (MonadWidget t m) => Amount t -> Ability -> NominalDiffTime -> m (Dynamic t Int)
 work labor ability interval = do
   ct <- liftIO getCurrentTime
   (tick::Event t TickInfo) <- tickLossy interval ct
@@ -224,7 +225,7 @@ buyDyn priceDyn cookie buyEv = do
 consum :: (MonadWidget t m) => Dynamic t Price -> Amount t -> m (Dynamic t Price)
 consum priceDyn commodity = foldDyn (+) 0 $ fmap (* (-1)) $ tag (current priceDyn) $ updated commodity
 
-profit :: (MonadWidget t m) => Amount t -> (Int -> NominalDiffTime -> Price) -> NominalDiffTime -> Dynamic t Price -> m (Dynamic t Int) -- profit = 利潤 = benefit - cost
+profit :: (MonadWidget t m) => Amount t -> Ability -> NominalDiffTime -> Dynamic t Price -> m (Dynamic t Int) -- profit = 利潤 = benefit - cost
 profit labor ability interval priceDyn = do
   benefit <- work labor ability interval
   cost <- consum priceDyn labor
@@ -238,11 +239,12 @@ buy price cookie () n = do
   else
     return $ n + 1
 
-
 data CommoditySpec = CommoditySpec
-  { price :: Price
-  , interval :: NominalDiffTime
-  , ability :: Int -> NominalDiffTime -> Price}
+  { initialPrice :: Price
+  , workInterval :: NominalDiffTime
+  , workAbility :: Ability
+  }
+-- CpS
 
 htmlInputElem :: Element -> HTMLInputElement
 htmlInputElem = HTMLInputElement . unElement
