@@ -1,0 +1,13 @@
+#!/bin/bash
+
+PROJECTS=$(./lsprj)
+JS=$(./pr2jspath $PROJECTS)
+CURRDIR=$(pwd)
+NAMES=$(./prjnames)
+
+for js in $JS;
+do
+  NAME=$(./prjtoname $js)
+  echo "cp $js $CURRDIR/$NAME/all.js"
+  cp $js $CURRDIR/docs/$NAME/all.js;
+done
