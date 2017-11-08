@@ -1,0 +1,15 @@
+#!/bin/bash
+
+PRJS=$(./lsprj | sed -e "s/ /\n/g")
+CURRDIR=$(pwd)
+
+for prjs in $PRJS;
+do
+  PRNAME=$(echo ${prjs//$CURRDIR/} | sed -e "s/\/\([^\/]*\).*$/\1/g")
+  case $1 in
+    docs/$PRNAME/*.js)
+      echo $prjs/bin/$PRNAME*/all.js
+      break;;
+    *);;
+  esac;
+done

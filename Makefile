@@ -1,17 +1,29 @@
-TESTDIR=$(shell cd ghcjs-test/ && stack path --local-install-root)
-SOURCEJS=$(wildcard $(TESTDIR)/bin/ghcjs-test-exe.jsexe/all.js)
-BUILDS=$(addprefix docs/ghcjs-test/,$(notdir $(SOURCEJS)))
+TESTDIR=$(shell ./lsprj)
+SOURCEJS=$(addsuffix /bin/*/all.js,$(TESTDIR))
+CURRDIR=$(shell pwd)
+PRJNAMES=$(shell echo $(subst $(CURRDIR),,$(SOURCEJS)) | sed -e "s/ /\n/g" | sed -e "s/\/\([^\/]*\).*/\1/g")
+BUILDS=$(addsuffix /all.js,$(addprefix docs/,$(PRJNAMES)))
+HTML=$(addsuffix /index.html,$(addprefix docs/,$(PRJNAMES)))
 
-all: $(BUILDS)
+func = $(shell echo $(subst $(CURRDIR),,$(1)) | sed -e "s/ /\n/g" | sed -e "s/\/\([^\/]*\).*/\1/g")
+
+all: $(BUILDS) $(HTML)
 
 yes:
-	echo $(TESTDIR)/bin/ghcjs-test-exe.jsexe/*.js | less
+	echo PRJNAMES: $(PRJNAMES)
+	echo BUILDS: $(BUILDS)
+	echo $(call func,$(wildcard $(TESTDIR)/bin/*/all.js))
 
-docs/ghcjs-test/%.js: $(TESTDIR)/bin/ghcjs-test-exe.jsexe/%.js
-	cp $< $@
+$(BUILDS): $(shell $(CURRDIR)/getsrchs $@)
+	$(if $(shell find `$(CURRDIR)/prname $@`), $(shell mkdir docs/`$(CURRDIR)/prname $@`),)
+	cp $(shell $(CURRDIR)/getsrchs $@) $@
 
-$(TESTDIR)/bin/ghcjs-test-exe.jsexe/all.js: ghcjs-test/src/Lib.hs ghcjs-test/app/Main.hs
-	cd ghcjs-test/; stack build
+$(HTML): template.html
+	cp template.html $@
+
+$(TESTDIR)/bin/*/all.js: $(call func,$@)/src/Lib.hs
+	cd $(call func,$@)
+	stack build
 
 clean:
 	rm -f ./docs/ghcjs-test/*.js

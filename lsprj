@@ -1,0 +1,9 @@
+#!/bin/bash
+
+PRJ="ghcjs-test/ ghcjs-test2/ clicker/"
+D=$(pwd)
+for p in $PRJ ;\
+				do
+          cd "$D/$p"
+          stack path --local-install-root
+        done
