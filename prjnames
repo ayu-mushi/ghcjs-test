@@ -1,0 +1,5 @@
+#!/bin/bash
+
+PRJS=$(./lsprj | sed -e "s/ /\n/g")
+CURRDIR=$(pwd)
+echo ${PRJS//$CURRDIR/} | sed -e "s/ /\n/g" | sed -e "s/\/\([^\/]*\).*/\1/g"

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+CURRDIR=$(pwd)
+PRJNAME=$1
+echo ${PRJNAME//$CURRDIR/} | sed -e "s/ /\n/g" | sed -e "s/\/\([^\/]*\).*/\1/g"

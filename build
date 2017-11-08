@@ -1,0 +1,33 @@
+#!/bin/bash
+
+CURRDIR=$(pwd)
+
+function is_update()
+{
+  NAME=$(./prjtoname $1)
+  SOURCE=$CURRDIR/$NAME/src/Lib.hs
+  JSPATH=$(./pr2jspath $1)
+  if [ $SOURCE -nt $JSPATH ]
+  then
+    echo "ソースが更新された" >&2
+    return 0
+  else
+    echo "ソースが更新されていない" >&2
+    return 1
+  fi
+}
+
+PRJECTS=$(./lsprj)
+for prj in $PRJECTS;
+do
+  PRNAME=$(./prjtoname $prj)
+  if $(is_update $prj);
+  then
+    cd $PRNAME;
+    echo $PRNAME"をビルド"
+    stack build
+    cd $CURRDIR
+  else
+    echo $PRNAME"の更新なし"
+  fi
+done
