@@ -12,7 +12,6 @@ function is_update()
     echo "ソースが更新された" >&2
     return 0
   else
-    echo "ソースが更新されていない" >&2
     return 1
   fi
 }

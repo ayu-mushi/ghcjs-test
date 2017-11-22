@@ -5,4 +5,5 @@ for prj in $@;
 do
   PRNAME=$(echo ${prj//$CURRDIR/} | sed -e "s/\/\([^\/]*\).*/\1/g")
   echo $prj/bin/$PRNAME*/all.js;
+  echo -e "\n"
 done

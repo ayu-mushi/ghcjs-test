@@ -1,13 +1,16 @@
 #!/bin/bash
 
 PROJECTS=$(./lsprj)
-JS=$(./pr2jspath $PROJECTS)
+JS=$(./pr2jspath $PROJECTS | sed -e "s/\ /\n/g")
 CURRDIR=$(pwd)
 NAMES=$(./prjnames)
 
 for js in $JS;
 do
   NAME=$(./prjtoname $js)
-  echo "cp $js $CURRDIR/$NAME/all.js"
+  echo "cp $js $CURRDIR/docs/$NAME/all.js"
   cp $js $CURRDIR/docs/$NAME/all.js;
 done
+
+echo "cp $CURRDIR/docs/ghcjs-test/all.js $CURRDIR/docs/all.js"
+cp $CURRDIR/docs/ghcjs-test/all.js $CURRDIR/docs/all.js

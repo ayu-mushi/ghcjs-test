@@ -78,6 +78,7 @@ initialHtml :: Html
 initialHtml = [shamlet|
 <div>
   <a href="https://github.com/ayu-mushi/ghcjs-test">source code of this "ghcjs test"
+  <a href="https://ayu-mushi.github.com/ghcjs-test/clicker/">link to Clicker
   <p>See also console!
 
 <div>
@@ -154,7 +155,7 @@ myWidget = do
   el "div" $ dynText $ _textInput_value t
   el "div" $ do
     text "Last keypressed: "
-    (holdDyn "None" $ show <$> _textInput_keypress t) >>= display
+    (holdDyn "None" $ Text.pack . show <$> _textInput_keypress t) >>= dynText
   rec
     (e, _) <- elAttr' "div" (fromList [("style", "color: red")]) $ (text ("[Click Here]: ")) >> clicker e
   el "div" $ do
@@ -162,89 +163,16 @@ myWidget = do
     (tick::Event t TickInfo) <- tickLossy 1 ct
     (holdDyn (0, ct) $ (\t -> (_tickInfo_n t, _tickInfo_lastUTC t)) <$> tick) & fmap (fmap $ Text.pack . show) >>= dynText
 
-    return ()
-
-  rec
-    cookie_click <- button "get cookie"
-    cookie <- count cookie_click >>= \sumcookie -> return $ foldl1 (zipDynWith (+)) [sumcookie, profit_grandma, profit_factory]
-    display cookie
-
-    grandma_button <- buttonDyn $ fmap (\pri -> Text.pack ("buy grandma ($"++ show pri ++" cookies)")) grandma_price
-
-    let grandma_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) uniq_grandma
-    uniq_grandma <- buyDyn grandma_price cookie grandma_button
-    profit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
-
-    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "います！") uniq_grandma
-    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_grandma
-
-    -- 減価償却費
-    -- 借金、リスク
-    -- 破産
-
-    factory_button <- buttonDyn $ fmap (\pri -> Text.pack ("buy factory ($"++ show pri ++" cookies)")) factory_price
-
-    let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
-    uniq_factory <- buyDyn factory_price cookie factory_button
-    profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
-
-    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "います！") uniq_factory
-    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_factory
-
   return ()
-    where
-      clicker :: (MonadWidget t m) => El t -> m ()
-      clicker e = do
-        deleyed <- delay 0.1 $ domEvent Click e
-        (d::Dynamic t Int) <- count deleyed
-        dynText $ Text.pack . (\x -> ("鈍感 ["++show x++"]"::String)) <$> d
-        (d'::Dynamic t Int) <- foldDyn (const(+1)) 0 $ domEvent Click e
-        dynText $ Text.pack . (\x -> ("敏感 ["++show x++"]"::String)) <$> d'
+  where
+    clicker :: (MonadWidget t m) => El t -> m ()
+    clicker e = do
+      deleyed <- delay 0.1 $ domEvent Click e
+      (d::Dynamic t Int) <- count deleyed
+      dynText $ Text.pack . (\x -> ("鈍感 ["++show x++"]"::String)) <$> d
+      (d'::Dynamic t Int) <- foldDyn (const(+1)) 0 $ domEvent Click e
+      dynText $ Text.pack . (\x -> ("敏感 ["++show x++"]"::String)) <$> d'
 
-
-type Price = Int
-type Ability = Int -> NominalDiffTime -> Price
-type Amount t = Dynamic t Int -- クッキー、おばあさん、工場などの数を表すDynamicだが、値段などは含まない
--- 値段もクッキーだけど。
-
-work :: (MonadWidget t m) => Amount t -> Ability -> NominalDiffTime -> m (Dynamic t Int)
-work labor ability interval = do
-  ct <- liftIO getCurrentTime
-  (tick::Event t TickInfo) <- tickLossy interval ct
-  let (product::Event t Int) = attachPromptlyDynWith (\n t -> ability n $ _tickInfo_alreadyElapsed t) labor tick
-  totalproduct <- foldDyn (+) 0 product
-  return totalproduct
-
-buyDyn :: (MonadWidget t m) => Dynamic t Price -> Amount t -> Event t () -> m (Amount t)
-buyDyn priceDyn cookie buyEv = do
-  commodity <- foldDynM (\() n -> do price <- sample $ current priceDyn
-                                     buy price cookie () n) 0 buyEv
-  (uniqCom::Dynamic t Int) <- holdUniqDyn commodity
-  return uniqCom
-
-consum :: (MonadWidget t m) => Dynamic t Price -> Amount t -> m (Dynamic t Price)
-consum priceDyn commodity = foldDyn (+) 0 $ fmap (* (-1)) $ tag (current priceDyn) $ updated commodity
-
-profit :: (MonadWidget t m) => Amount t -> Ability -> NominalDiffTime -> Dynamic t Price -> m (Dynamic t Int) -- profit = 利潤 = benefit - cost
-profit labor ability interval priceDyn = do
-  benefit <- work labor ability interval
-  cost <- consum priceDyn labor
-  return $ zipDynWith (+) cost benefit
-
-buy :: (Reflex t) => Price -> Amount t -> () -> Int -> PushM t Int
-buy price cookie () n = do
-  nowcok <- sample $ current cookie
-  if nowcok < price then
-    return n
-  else
-    return $ n + 1
-
-data CommoditySpec = CommoditySpec
-  { initialPrice :: Price
-  , workInterval :: NominalDiffTime
-  , workAbility :: Ability
-  }
--- CpS
 
 htmlInputElem :: Element -> HTMLInputElement
 htmlInputElem = HTMLInputElement . unElement
