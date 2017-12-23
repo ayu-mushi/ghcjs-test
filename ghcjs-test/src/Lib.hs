@@ -77,8 +77,11 @@ doSth = do
 initialHtml :: Html
 initialHtml = [shamlet|
 <div>
-  <a href="https://github.com/ayu-mushi/ghcjs-test">source code of this "ghcjs test"
-  <a href="https://ayu-mushi.github.com/ghcjs-test/clicker/">link to Clicker
+  <ul>
+    <li>
+      <a href="https://github.com/ayu-mushi/ghcjs-test">source code of this "ghcjs test"
+    <li>
+      <a href="https://ayu-mushi.github.com/ghcjs-test/clicker/">link to Clicker
   <p>See also console!
 
 <div>
