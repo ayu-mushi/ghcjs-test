@@ -19,8 +19,9 @@ import Data.Text.Internal (Text)
 import Control.Monad.IO.Class (liftIO)
 import System.Random (randomR, mkStdGen, Random, newStdGen)
 import Control.Monad.Fix (MonadFix)
-import Control.Monad (void)
+import Control.Monad (void, join)
 import Data.Monoid ((<>))
+import Data.Map as Map (singleton)
 
 buttonDyn :: (DomBuilder t m, MonadWidget t m) => Dynamic t Text -> m (Event t ())
 buttonDyn t = do
@@ -71,61 +72,71 @@ data CommoditySpec = CommoditySpec
   }
 -- CpS
 
-myWidget :: (MonadWidget t m) => m ()
-myWidget = mdo
+buttonEl :: MonadWidget t m => Text -> m (El t, Event t ())
+buttonEl s = do
+  (e, _) <- elAttr' "button" (Map.singleton "type" "button") $ text s
+  return $ (e, domEvent Click e)
 
+myWidget :: (MonadWidget t m) => m ()
+myWidget = do
   text "Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!"
   -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
   ct <- liftIO getCurrentTime
-  (tick::Dynamic t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct) >>= holdDyn 0
-  dynText $ fmap (\time -> Text.pack $ "プレイ総時間:" <> show time) tick
 
-  cookie_click <- button "get cookie"
-  (cookie :: Amount t) <- count cookie_click >>= \sumcookie -> return $ foldl1 (zipDynWith (+)) [sumcookie, profit_grandma, profit_factory, profit_gambling]
-  display cookie
-  --(holdDyn 0 $ tagPromptlyDyn cookie (updated tick)) >>= display
+  rec
+    (tick::Dynamic t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct) >>= holdDyn 0
+    dynText $ fmap (\time -> Text.pack $ "プレイ総時間:" <> show time) tick
 
-  grandma_button <- buttonDyn $ fmap (\price -> Text.pack ("buy grandma ($"++ show price ++" cookies)")) grandma_price
+    cookie_click <- button "get cookie"
+    (cookie :: Amount t) <- count cookie_click >>= \sumcookie -> return $ foldl1 (zipDynWith (+)) [sumcookie, profit_grandma, profit_factory, profit_gambling]
+    display cookie
+    (holdDyn 0 $ tagPromptlyDyn cookie (updated tick)) >>= display
 
-  grandma_price' <- delay 2 $ fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ updated $ uniq_grandma
-  grandma_price <- holdDyn 20 grandma_price'
-  (uniq_grandma :: Amount t) <- buyDyn grandma_price cookie grandma_button
-  profit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
+    grandma_button <- buttonDyn $ fmap (\price -> Text.pack ("buy grandma ($"++ show price ++" cookies)")) grandma_price
 
-  dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_grandma
-  dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_grandma
+    grandma_price' <- delay 2 $ fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ updated $ uniq_grandma
+    grandma_price <- holdDyn 20 grandma_price'
+    (uniq_grandma :: Amount t) <- buyDyn grandma_price cookie grandma_button
+    profit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
 
-  -- 減価償却費
-  -- 借金、ギャンブル、リスク
-  -- 破産
+    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_grandma
+    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_grandma
 
-  factory_button <- buttonDyn $ fmap (\price -> Text.pack ("buy factory ($"++ show price ++" cookies)")) factory_price
+    -- 投資、資本
+    -- 借金、ギャンブル、リスク
+    -- 破産
+    -- 果樹、果実
+    -- 欲求
+    -- コンソール
+    -- 実績解放
 
-  let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
-  (uniq_factory :: Amount t) <- buyDyn factory_price cookie factory_button
-  profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
+    factory_button <- buttonDyn $ fmap (\price -> Text.pack ("buy factory ($"++ show price ++" cookies)")) factory_price
 
-  dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_factory
-  dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_factory
+    let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
+    (uniq_factory :: Amount t) <- buyDyn factory_price cookie factory_button
+    profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
 
-  -- 借金
-  let debt_price = fmap (\n -> floor $ (-20.0::Float) * ((1.15::Float) ^ n)) uniq_debt
-  debt_button <- buttonDyn $ fmap (\price -> Text.pack ("借金debt ($"++ show price ++" cookies)")) debt_price
-  (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
+    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_factory
+    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_factory
 
-  dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_debt
+    -- 借金
+    let debt_price = fmap (\n -> floor $ (-20.0::Float) * ((1.15::Float) ^ n)) uniq_debt
+    debt_button <- buttonDyn $ fmap (\price -> Text.pack ("借金debt ($"++ show price ++" cookies)")) debt_price
+    (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
+    -- buttonDyn で返済ボタン
 
-  -- ギャンブル
-  let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
-  gambling_button <- buttonDyn $ fmap (\price -> Text.pack ("gambling ($"++ show price ++" cookies)")) gambling_price
-  (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
-  (randEv :: m (Event t Int)) <- liftIO $ foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
-  (randEv' :: Event t Int) <- randEv
-  (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv'
-  gambling_cost <- consum gambling_price uniq_gambling
-  let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
+    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_debt
 
-  dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_gambling
+    -- ギャンブル
+    let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
+    gambling_button <- buttonDyn $ fmap (\price -> Text.pack ("gambling ($"++ show price ++" cookies)")) gambling_price
+    (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
+    (randEv :: Event t Int) <- join . liftIO $ foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
+    (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
+    gambling_cost <- consum gambling_price uniq_gambling
+    let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
+
+    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_gambling
 
 
   -- TODO: MVCの分離
@@ -135,6 +146,7 @@ myWidget = mdo
   -- 値上げ時間をちょっとあとにしたら? 連打まとめ買いでお得
   return ()
     where
+      gamble_sheet :: Int -> Int
       gamble_sheet x
         | x == 10 = 50
         | x < 10 && 6 < x = 40
