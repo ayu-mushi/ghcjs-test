@@ -11,7 +11,7 @@ import Reflex.Dom as Reflex
   holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed),  delay, count,  ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
   RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
   Reflex, updated, gate, DomBuilder, splitE,
-  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith)
+  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith, getPostBuild)
 import Reflex.Class (accum, Dynamic, Event, Behavior)
 import qualified Data.Text as Text(pack, lines, unlines)
 import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime, NominalDiffTime)
@@ -20,6 +20,7 @@ import Control.Monad.IO.Class (liftIO)
 import System.Random (randomR, mkStdGen, Random, newStdGen)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad (void, join)
+import Data.Functor ((<$), ($>))
 import Control.Monad.Trans (lift)
 import Data.Monoid ()
 import Data.Map as Map (singleton)
@@ -156,7 +157,12 @@ data PriceSeq = PriceSeq {
 newtype Log = Log { unLog :: Text } deriving Show
 
 instance Semigroup Log where
+  Log "" <> Log y = Log $ y
+  Log x <> Log "" = Log $ x
   Log x <> Log y = Log $ x <> "\n" <> y
+
+instance Monoid Log where
+  mempty = Log ""
 
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
@@ -174,8 +180,11 @@ myWidget = do
     debt_button <- getRet $ workerView "借金" debt_price uniq_debt uniq_debt -- buttonDyn で返済ボタン
     (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
 
-    (log::Event t Log) <- accum (<>) (Log "Welcome to Clicker.") gambling_log
-    console <- textArea $ def & textAreaConfig_initialValue .~ "Welcome to Clicker." & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;") & setValue .~ (fmap unLog log)
+    (onload :: Event t ()) <- getPostBuild
+    (log::Event t Log) <- accum (<>) mempty $ (Log "Welcome to Clicker." <$ onload) <> gambling_log
+    console <- textArea $ def
+      & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
+      & setValue .~ (fmap unLog log)
 
   -- 投資、資本
   -- 借金、ギャンブル、リスク
