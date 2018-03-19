@@ -77,6 +77,7 @@ buttonEl s = do
   (e, _) <- elAttr' "button" (Map.singleton "type" "button") $ text s
   return $ (e, domEvent Click e)
 
+-- View Side in Model and View
 workerView :: (DomBuilder t m, MonadWidget t m) => String -> Dynamic t Int -> Dynamic t Price -> Dynamic t Price -> m (El t, Event t ())
 workerView name p uniq profit = el' "div" $ do
   button <- buttonDyn $ fmap (\price -> Text.pack ("buy " ++ name ++ " ($"++ show price ++" cookies)")) p
@@ -143,6 +144,11 @@ myWidget = do
       gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
       (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
       (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
+
+      let gamble_sheet x | x == 10 = 50
+                         | x < 10 && 6 < x = 40
+                         | otherwise = 20
+
       (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
       gambling_cost <- consum gambling_price uniq_gambling
       let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
@@ -154,12 +160,6 @@ myWidget = do
   -- 曜日ごとに儲かる
   -- 値上げ時間をちょっとあとにしたら? 連打まとめ買いでお得
   return ()
-    where
-      gamble_sheet :: Int -> Int
-      gamble_sheet x
-        | x == 10 = 50
-        | x < 10 && 6 < x = 40
-        | otherwise = 20
 
 -- https://hackage.haskell.org/package/reflex-gloss-scene-0.1.2/docs/src/Reflex-Gloss-Random.html#foldRand
 foldGen :: (Reflex t, MonadHold t m, MonadFix m) => s -> (s -> (a, s)) -> Event t () -> m (Event t a)
