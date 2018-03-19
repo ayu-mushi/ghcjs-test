@@ -8,10 +8,11 @@ module Lib
 
 import Reflex.Dom as Reflex
   (mainWidget, text, el, elAttr, el', elAttr', MonadWidget, textInput, TextInput(..), dynText, def,
-  holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
+  holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed),  delay, count,  ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
   RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
   Reflex, updated, gate, DomBuilder, splitE,
-  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith, Behavior)
+  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith)
+import Reflex.Class (accum, Dynamic, Event, Behavior)
 import qualified Data.Text as Text(pack, lines, unlines)
 import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime, NominalDiffTime)
 import Data.Text.Internal (Text)
@@ -19,10 +20,12 @@ import Control.Monad.IO.Class (liftIO)
 import System.Random (randomR, mkStdGen, Random, newStdGen)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad (void, join)
-import Data.Monoid ((<>))
+import Control.Monad.Trans (lift)
+import Data.Monoid ()
 import Data.Map as Map (singleton)
 import Control.Lens (Lens', (&), (.~))
 import Control.Lens.Iso(iso, Iso')
+import Data.Semigroup (Semigroup, (<>))
 
 buttonDyn :: (DomBuilder t m, MonadWidget t m) => Dynamic t Text -> m (Event t ())
 buttonDyn t = do
@@ -98,7 +101,7 @@ factory cookie = mdo
   profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
   return profit_factory
 
-gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price, Event t Text) -- ギャンブル
+gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price, Event t Log) -- ギャンブル
 gambling cookie = mdo
   let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
   let gambling_price_original = gambling_price
@@ -118,7 +121,7 @@ gambling cookie = mdo
   let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
 
   let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)") (current gambling_price_original) marginal_benefit
-  return (profit_gambling, gambling_log)
+  return (profit_gambling, fmap Log $ gambling_log)
 
 -- end </workers>
 
@@ -150,6 +153,11 @@ data PriceSeq = PriceSeq {
   markupPercent :: Float
   }
 
+newtype Log = Log { unLog :: Text } deriving Show
+
+instance Semigroup Log where
+  Log x <> Log y = Log $ x <> "\n" <> y
+
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
   text "Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!"
@@ -166,7 +174,8 @@ myWidget = do
     debt_button <- getRet $ workerView "借金" debt_price uniq_debt uniq_debt -- buttonDyn で返済ボタン
     (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
 
-    console <- textArea $ def & textAreaConfig_initialValue .~ "Welcome to Clicker." & attributes .~ constDyn ("readonly" =: "readonly") & setValue .~ gambling_log
+    (log::Event t Log) <- accum (<>) (Log "Welcome to Clicker.") gambling_log
+    console <- textArea $ def & textAreaConfig_initialValue .~ "Welcome to Clicker." & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;") & setValue .~ (fmap unLog log)
 
   -- 投資、資本
   -- 借金、ギャンブル、リスク
