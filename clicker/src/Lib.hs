@@ -124,14 +124,19 @@ makeCookie sums = getRet $ el' "div" $ do
   -- (holdDyn 0 $ tagPromptlyDyn cookie (updated tick)) >>= display -- 1秒ごとにdisplayを更新
   return cookie
 
-myWidget :: (MonadWidget t m) => m ()
-myWidget = do
-  text "Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!"
-  -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
+timer :: (MonadWidget t m) => m (Dynamic t Integer)
+timer = do
   ct <- liftIO getCurrentTime
 
   (tick::Dynamic t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct) >>= holdDyn 0
   dynText $ fmap (\time -> Text.pack $ "プレイ総時間:" <> show time) tick
+  return tick
+
+myWidget :: (MonadWidget t m) => m ()
+myWidget = do
+  text "Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!"
+  -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
+  timer
 
   rec
     cookie <- makeCookie [profit_grandma, profit_factory, profit_gambling]
