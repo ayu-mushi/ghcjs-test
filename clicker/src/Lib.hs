@@ -9,9 +9,9 @@ module Lib
 import Reflex.Dom as Reflex
   (mainWidget, text, el, elAttr, el', elAttr', MonadWidget, textInput, TextInput(..), dynText, def,
   holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
-  RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, foldDynM, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
-  sample, PushM, Reflex, updated, gate, DomBuilder, splitE,
-  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith)
+  RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
+  Reflex, updated, gate, DomBuilder, splitE,
+  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith, Behavior)
 import qualified Data.Text as Text(pack, lines, unlines)
 import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime, NominalDiffTime)
 import Data.Text.Internal (Text)
@@ -42,12 +42,15 @@ work labor ability interval = do
   totalproduct <- foldDyn (+) 0 product
   return totalproduct
 
+buy :: (Reflex t) => Dynamic t Price -> Amount t -> Event t () -> Event t ()
+buy priceDyn cookie buying =
+  let isBuyable = (>=) <$> (current cookie) <*> (current priceDyn)
+    in gate isBuyable buying
+
 buyDyn :: (MonadWidget t m) => Dynamic t Price -> Amount t -> Event t () -> m (Amount t)
 buyDyn priceDyn cookie buyEv = do
-  commodity <- foldDynM (\() n -> do price <- sample $ current priceDyn
-                                     buy price cookie () n) 0 buyEv
-  (uniqCom::Dynamic t Int) <- holdUniqDyn commodity
-  return uniqCom
+  commodity <- count $ buy priceDyn cookie buyEv
+  return commodity
 
 consum :: (MonadWidget t m) => Dynamic t Price -> Amount t -> m (Dynamic t Price)
 consum priceDyn commodity = foldDyn (+) 0 $ fmap (* (-1)) $ tag (current priceDyn) $ updated commodity
@@ -58,16 +61,8 @@ profit labor ability interval priceDyn = do
   cost <- consum priceDyn labor
   return $ zipDynWith (+) cost benefit
 
-buy :: (Reflex t) => Price -> Amount t -> () -> Int -> PushM t Int
-buy price cookie () n = do
-  nowcok <- sample $ current cookie
-  if nowcok < price then
-    return n
-  else
-    return $ n + 1
-
 data CommoditySpec = CommoditySpec
-  { initialPrice :: Price
+  { priceSeq :: PriceSeq
   , workInterval :: NominalDiffTime
   , workAbility :: Ability
   }
@@ -150,6 +145,10 @@ textArea_lines = textArea_value . liner
     liner = iso (fmap Text.lines) (fmap Text.unlines)
 
 -- 値段 = 初期値と値上げ率から定まる等比数列
+data PriceSeq = PriceSeq {
+  initialPrice :: Price,
+  markupPercent :: Float
+  }
 
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
