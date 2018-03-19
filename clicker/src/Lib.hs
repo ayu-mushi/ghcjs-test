@@ -20,6 +20,7 @@ import Control.Monad.IO.Class (liftIO)
 import System.Random (randomR, mkStdGen, Random, newStdGen)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad (void, join)
+import Control.Monad.Writer (WriterT, tell, runWriterT)
 import Data.Functor ((<$), ($>))
 import Control.Monad.Trans (lift)
 import Data.Monoid ()
@@ -102,27 +103,30 @@ factory cookie = mdo
   profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
   return profit_factory
 
-gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price, Event t Text) -- ギャンブル
-gambling cookie = mdo
-  let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
-  let gambling_price_original = gambling_price
-  gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
-  (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
-  (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
+gambling :: (MonadWidget t m) => Amount t -> WriterT (Event t Text) m (Dynamic t Price) -- ギャンブル
+gambling cookie = do
+  (marginal_benefit, gambling_price_original, profit_gambling) <- lift $ mdo
+    let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
+    let gambling_price_original = gambling_price
+    gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
+    (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
+    (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
 
-  let gamble_sheet (priceNow::Price) (x::Int) | x == 10 = floor $ ((fromInteger $ toInteger priceNow)::Float) * 2.5
-                     | x < 10 && 6 < x = priceNow * 2
-                     | otherwise = floor $ ((fromInteger $ toInteger priceNow)::Float) * 0.5
+    let gamble_sheet (priceNow::Price) (x::Int) | x == 10 = floor $ ((fromInteger $ toInteger priceNow)::Float) * 2.5
+                       | x < 10 && 6 < x = priceNow * 2
+                       | otherwise = floor $ ((fromInteger $ toInteger priceNow)::Float) * 0.5
 
-  let marginal_benefit = fmap (uncurry gamble_sheet) $ attach (current gambling_price) randEv
+    let marginal_benefit = fmap (uncurry gamble_sheet) $ attach (current gambling_price) randEv
 
-  (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 marginal_benefit
-  gambling_cost <- consum gambling_price uniq_gambling
+    (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 marginal_benefit
+    gambling_cost <- consum gambling_price uniq_gambling
 
-  let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
+    let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
+    return (marginal_benefit, gambling_price_original, profit_gambling)
 
   let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)\n") (current gambling_price_original) marginal_benefit
-  return (profit_gambling, gambling_log)
+  tell gambling_log
+  return profit_gambling
 
 -- end </workers>
 
@@ -164,17 +168,20 @@ myWidget = do
     cookie <- makeCookie [profit_grandma, profit_factory, profit_gambling]
     profit_grandma <- grandma cookie
     profit_factory <- factory cookie
-    (profit_gambling, gambling_log) <- gambling cookie
+    (profit_gambling, log) <- runWriterT $ do
+      (onload :: Event t ()) <- lift getPostBuild
+      tell ("Welcome to Clicker.\n" <$ onload)
+      profit_gambling <- gambling cookie
+      return profit_gambling
 
     let debt_price = fmap (\n -> floor $ (-20.0::Float) * ((1.15::Float) ^ n)) uniq_debt -- 借金
     debt_button <- getRet $ workerView "借金" debt_price uniq_debt uniq_debt -- buttonDyn で返済ボタン
     (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
 
-    (onload :: Event t ()) <- getPostBuild
-    (log::Event t Text) <- accum (<>) "" $ ("Welcome to Clicker.\n" <$ onload) <> gambling_log
-    console <- textArea $ def
-      & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
-      & setValue .~ log
+  (logAcc::Event t Text) <- accum (<>) "" log
+  console <- textArea $ def
+    & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
+    & setValue .~ logAcc
 
   -- 投資、資本
   -- 借金、ギャンブル、リスク
