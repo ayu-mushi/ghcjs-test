@@ -72,11 +72,6 @@ data CommoditySpec = CommoditySpec
   }
 -- CpS
 
-buttonEl :: MonadWidget t m => Text -> m (El t, Event t ())
-buttonEl s = do
-  (e, _) <- elAttr' "button" (Map.singleton "type" "button") $ text s
-  return $ (e, domEvent Click e)
-
 -- View Side in Model and View
 workerView :: (DomBuilder t m, MonadWidget t m) => String -> Dynamic t Int -> Dynamic t Price -> Dynamic t Price -> m (El t, Event t ())
 workerView name p uniq profit = el' "div" $ do
@@ -107,19 +102,19 @@ factory cookie = mdo
 
 gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price) -- ギャンブル
 gambling cookie= mdo
-      let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
-      gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
-      (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
-      (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
+  let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
+  gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
+  (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
+  (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
 
-      let gamble_sheet x | x == 10 = 50
-                         | x < 10 && 6 < x = 40
-                         | otherwise = 20
+  let gamble_sheet x | x == 10 = 50
+                     | x < 10 && 6 < x = 40
+                     | otherwise = 20
 
-      (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
-      gambling_cost <- consum gambling_price uniq_gambling
-      let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
-      return profit_gambling
+  (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
+  gambling_cost <- consum gambling_price uniq_gambling
+  let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
+  return profit_gambling
 
 makeCookie :: (MonadWidget t m) => [Dynamic t Price] -> m (Amount t)
 makeCookie sums = getRet $ el' "div" $ do
