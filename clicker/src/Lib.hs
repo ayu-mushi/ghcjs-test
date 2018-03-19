@@ -2,7 +2,6 @@
 {-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
 {-# LANGUAGE RecursiveDo  #-}
-
 module Lib
     ( someFunc
     ) where
@@ -12,8 +11,8 @@ import Reflex.Dom as Reflex
   holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
   RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, foldDynM, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
   sample, PushM, Reflex, updated, gate, DomBuilder, splitE,
-  MonadHold, hold, tagPromptlyDyn)
-import qualified Data.Text as Text(pack)
+  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith)
+import qualified Data.Text as Text(pack, lines, unlines)
 import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime, NominalDiffTime)
 import Data.Text.Internal (Text)
 import Control.Monad.IO.Class (liftIO)
@@ -22,6 +21,8 @@ import Control.Monad.Fix (MonadFix)
 import Control.Monad (void, join)
 import Data.Monoid ((<>))
 import Data.Map as Map (singleton)
+import Control.Lens (Lens', (&), (.~))
+import Control.Lens.Iso(iso, Iso')
 
 buttonDyn :: (DomBuilder t m, MonadWidget t m) => Dynamic t Text -> m (Event t ())
 buttonDyn t = do
@@ -83,6 +84,8 @@ workerView name p uniq profit = el' "div" $ do
 getRet :: Functor f => f (a, b) -> f b
 getRet = fmap snd
 
+
+-- begin <workers>
 grandma :: (MonadWidget t m) => Amount t -> m (Dynamic t Price)
 grandma cookie = mdo
   grandma_button <- getRet $ workerView "Grandma" grandma_price uniq_grandma profit_grandma
@@ -100,21 +103,30 @@ factory cookie = mdo
   profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
   return profit_factory
 
-gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price) -- ギャンブル
-gambling cookie= mdo
+gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price, Event t Text) -- ギャンブル
+gambling cookie = mdo
   let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
+  let gambling_price_original = gambling_price
   gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
   (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
   (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
 
-  let gamble_sheet x | x == 10 = 50
-                     | x < 10 && 6 < x = 40
-                     | otherwise = 20
+  let gamble_sheet (priceNow::Price) (x::Int) | x == 10 = floor $ ((fromInteger $ toInteger priceNow)::Float) * 2.5
+                     | x < 10 && 6 < x = priceNow * 2
+                     | otherwise = floor $ ((fromInteger $ toInteger priceNow)::Float) * 0.5
 
-  (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
+  let marginal_benefit = fmap (uncurry gamble_sheet) $ attach (current gambling_price) randEv
+
+  (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 marginal_benefit
   gambling_cost <- consum gambling_price uniq_gambling
+
   let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
-  return profit_gambling
+
+  let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)") (current gambling_price_original) marginal_benefit
+  return (profit_gambling, gambling_log)
+
+-- end </workers>
+
 
 makeCookie :: (MonadWidget t m) => [Dynamic t Price] -> m (Amount t)
 makeCookie sums = getRet $ el' "div" $ do
@@ -127,10 +139,17 @@ makeCookie sums = getRet $ el' "div" $ do
 timer :: (MonadWidget t m) => m (Dynamic t Integer)
 timer = do
   ct <- liftIO getCurrentTime
-
   (tick::Dynamic t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct) >>= holdDyn 0
   dynText $ fmap (\time -> Text.pack $ "プレイ総時間:" <> show time) tick
   return tick
+
+textArea_lines :: Reflex t => Lens' (TextArea t) (Dynamic t [Text])
+textArea_lines = textArea_value . liner
+  where
+    liner :: Reflex t => Iso' (Dynamic t Text) (Dynamic t [Text])
+    liner = iso (fmap Text.lines) (fmap Text.unlines)
+
+-- 値段 = 初期値と値上げ率から定まる等比数列
 
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
@@ -142,11 +161,13 @@ myWidget = do
     cookie <- makeCookie [profit_grandma, profit_factory, profit_gambling]
     profit_grandma <- grandma cookie
     profit_factory <- factory cookie
-    profit_gambling <- gambling cookie
+    (profit_gambling, gambling_log) <- gambling cookie
 
     let debt_price = fmap (\n -> floor $ (-20.0::Float) * ((1.15::Float) ^ n)) uniq_debt -- 借金
     debt_button <- getRet $ workerView "借金" debt_price uniq_debt uniq_debt -- buttonDyn で返済ボタン
     (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
+
+    console <- textArea $ def & textAreaConfig_initialValue .~ "Welcome to Clicker." & attributes .~ constDyn ("readonly" =: "readonly") & setValue .~ gambling_log
 
   -- 投資、資本
   -- 借金、ギャンブル、リスク
