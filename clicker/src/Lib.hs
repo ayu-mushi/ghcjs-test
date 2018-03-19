@@ -102,7 +102,7 @@ factory cookie = mdo
   profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
   return profit_factory
 
-gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price, Event t Log) -- ギャンブル
+gambling :: (MonadWidget t m) => Amount t -> m (Dynamic t Price, Event t Text) -- ギャンブル
 gambling cookie = mdo
   let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
   let gambling_price_original = gambling_price
@@ -121,8 +121,8 @@ gambling cookie = mdo
 
   let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
 
-  let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)") (current gambling_price_original) marginal_benefit
-  return (profit_gambling, fmap Log $ gambling_log)
+  let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)\n") (current gambling_price_original) marginal_benefit
+  return (profit_gambling, gambling_log)
 
 -- end </workers>
 
@@ -154,21 +154,11 @@ data PriceSeq = PriceSeq {
   markupPercent :: Float
   }
 
-newtype Log = Log { unLog :: Text } deriving Show
-
-instance Semigroup Log where
-  Log "" <> Log y = Log $ y
-  Log x <> Log "" = Log $ x
-  Log x <> Log y = Log $ x <> "\n" <> y
-
-instance Monoid Log where
-  mempty = Log ""
-
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
   text "Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!"
   -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
-  timer
+  wallTime <- timer
 
   rec
     cookie <- makeCookie [profit_grandma, profit_factory, profit_gambling]
@@ -181,10 +171,10 @@ myWidget = do
     (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
 
     (onload :: Event t ()) <- getPostBuild
-    (log::Event t Log) <- accum (<>) mempty $ (Log "Welcome to Clicker." <$ onload) <> gambling_log
+    (log::Event t Text) <- accum (<>) "" $ ("Welcome to Clicker.\n" <$ onload) <> gambling_log
     console <- textArea $ def
       & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
-      & setValue .~ (fmap unLog log)
+      & setValue .~ log
 
   -- 投資、資本
   -- 借金、ギャンブル、リスク
