@@ -77,30 +77,44 @@ buttonEl s = do
   (e, _) <- elAttr' "button" (Map.singleton "type" "button") $ text s
   return $ (e, domEvent Click e)
 
+workerView :: (DomBuilder t m, MonadWidget t m) => String -> Dynamic t Int -> Dynamic t Price -> Dynamic t Price -> m (El t, Event t ())
+workerView name p uniq profit = el' "div" $ do
+  button <- buttonDyn $ fmap (\price -> Text.pack ("buy " ++ name ++ " ($"++ show price ++" cookies)")) p
+  dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq
+  dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit
+  return button
+
+getRet :: Functor f => f (a, b) -> f b
+getRet = fmap snd
+
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
   text "Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!"
   -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
   ct <- liftIO getCurrentTime
 
+  (tick::Dynamic t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct) >>= holdDyn 0
+  dynText $ fmap (\time -> Text.pack $ "プレイ総時間:" <> show time) tick
+
   rec
-    (tick::Dynamic t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct) >>= holdDyn 0
-    dynText $ fmap (\time -> Text.pack $ "プレイ総時間:" <> show time) tick
+    cookie <- getRet $ (\sums -> (el' "div" $ do
+      cookie_click <- button "get cookie"
+      (cookie :: Amount t) <- count cookie_click >>= \sumcookie -> return $ foldl1 (zipDynWith (+)) $ sumcookie:sums
+      display cookie
+      -- (holdDyn 0 $ tagPromptlyDyn cookie (updated tick)) >>= display -- 1秒ごとにdisplayを更新
+      return cookie)) [profit_grandma, profit_factory, profit_gambling]
 
-    cookie_click <- button "get cookie"
-    (cookie :: Amount t) <- count cookie_click >>= \sumcookie -> return $ foldl1 (zipDynWith (+)) [sumcookie, profit_grandma, profit_factory, profit_gambling]
-    display cookie
-    (holdDyn 0 $ tagPromptlyDyn cookie (updated tick)) >>= display
+    --grandma_button <- buttonDyn $ fmap (\price -> Text.pack ("buy grandma ($"++ show price ++" cookies)")) grandma_price
+    profit_grandma <- (\cookie -> mdo
+      grandma_button <- getRet $ workerView "Grandma" grandma_price uniq_grandma profit_grandma
+      grandma_price' <- delay 2 $ fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ updated $ uniq_grandma
+      grandma_price <- holdDyn 20 grandma_price'
+      (uniq_grandma :: Amount t) <- buyDyn grandma_price cookie grandma_button
+      profit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
+      return profit_grandma) cookie
 
-    grandma_button <- buttonDyn $ fmap (\price -> Text.pack ("buy grandma ($"++ show price ++" cookies)")) grandma_price
-
-    grandma_price' <- delay 2 $ fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ updated $ uniq_grandma
-    grandma_price <- holdDyn 20 grandma_price'
-    (uniq_grandma :: Amount t) <- buyDyn grandma_price cookie grandma_button
-    profit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
-
-    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_grandma
-    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_grandma
+    --dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_grandma
+    --dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_grandma
 
     -- 投資、資本
     -- 借金、ギャンブル、リスク
@@ -110,34 +124,29 @@ myWidget = do
     -- コンソール
     -- 実績解放
 
-    factory_button <- buttonDyn $ fmap (\price -> Text.pack ("buy factory ($"++ show price ++" cookies)")) factory_price
-
-    let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
-    (uniq_factory :: Amount t) <- buyDyn factory_price cookie factory_button
-    profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
-
-    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_factory
-    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_factory
+    profit_factory <- (\cookie -> mdo
+      factory_button <- getRet $ workerView "factory" factory_price uniq_factory profit_factory
+      let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
+      (uniq_factory :: Amount t) <- buyDyn factory_price cookie factory_button
+      profit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
+      return profit_factory) cookie
 
     -- 借金
     let debt_price = fmap (\n -> floor $ (-20.0::Float) * ((1.15::Float) ^ n)) uniq_debt
-    debt_button <- buttonDyn $ fmap (\price -> Text.pack ("借金debt ($"++ show price ++" cookies)")) debt_price
+    debt_button <- getRet $ workerView "借金" debt_price uniq_debt uniq_debt
     (uniq_debt :: Amount t) <- buyDyn debt_price cookie debt_button
     -- buttonDyn で返済ボタン
 
-    dynText $ fmap (\n -> Text.pack $ "数:" ++ show n ++ "匹います！") uniq_debt
-
     -- ギャンブル
-    let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
-    gambling_button <- buttonDyn $ fmap (\price -> Text.pack ("gambling ($"++ show price ++" cookies)")) gambling_price
-    (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
-    (randEv :: Event t Int) <- join . liftIO $ foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
-    (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
-    gambling_cost <- consum gambling_price uniq_gambling
-    let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
-
-    dynText $ fmap (\prof -> Text.pack $ "利潤: " ++ show prof ++ "だよ☆") profit_gambling
-
+    profit_gambling <- (\cookie -> mdo
+      let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
+      gambling_button <- getRet $ workerView "gambling" gambling_price uniq_gambling profit_gambling
+      (uniq_gambling :: Amount t) <- buyDyn gambling_price cookie gambling_button
+      (randEv :: Event t Int) <- foldRandomRs (0, 10) (updated $ void $ uniq_gambling)
+      (gambling_benefit :: Dynamic t Int) <- foldDyn (+) 0 $ fmap gamble_sheet randEv
+      gambling_cost <- consum gambling_price uniq_gambling
+      let profit_gambling = (+) <$> gambling_benefit <*> gambling_cost
+      return profit_gambling) cookie
 
   -- TODO: MVCの分離
   -- 運をお金で買う
@@ -160,10 +169,11 @@ foldGen initialState f input = do
     let (output, newState) = splitE $ f <$> tag curState input
   return output
 
-foldRandomRs :: (Reflex t, MonadHold t m, MonadFix m, Random a) => (a, a) -> Event t () -> IO(m (Event t a))
+foldRandomRs :: (MonadWidget t m, Reflex t, MonadHold t m, MonadFix m, Random a) => (a, a) -> Event t () -> m (Event t a)
 foldRandomRs range ev = do
-  gen <- newStdGen
-  return (foldGen gen (randomR range) ev)
+  gen <- liftIO newStdGen
+  e <- foldGen gen (randomR range) ev
+  return e
 
 someFunc :: IO ()
 someFunc = mainWidget myWidget
