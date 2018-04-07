@@ -1,7 +1,12 @@
 {-# LANGUAGE JavaScriptFFI, InterruptibleFFI #-}
 {-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE RecursiveDo, Rank2Types#-}
+{-# LANGUAGE RecursiveDo, Rank2Types, FlexibleContexts#-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 module Lib
     ( someFunc
     ) where
@@ -11,22 +16,24 @@ import Reflex.Dom as Reflex
   holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed),  delay, count,  ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
   RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
   Reflex, updated, gate, DomBuilder, splitE,
-  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith, getPostBuild, PostBuild, attachWidget, askJSContext, performEvent, ffor, PerformEvent, Performable)
+  MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith, getPostBuild, PostBuild, attachWidget, askJSContext, performEvent, ffor, PerformEvent, Performable, zipDyn, distributeListOverDyn)
 import Reflex.Dom.Main (Widget, mainWidgetWithHead, mainWidgetWithHead')
+import Reflex.Dynamic (distributeMapOverDynPure)
 import Reflex.Class (accum, Dynamic, Event, Behavior, headE)
 import Reflex.Spider (SpiderTimeline, Global, Spider)
-import qualified Data.Text as Text(pack, lines, unlines)
+import qualified Data.Text as Text(pack, lines, unlines, isPrefixOf)
 import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime, NominalDiffTime)
 import Data.Text.Internal (Text)
+import Data.Maybe (fromMaybe)
 import Control.Monad.IO.Class (liftIO)
 import System.Random (randomR, mkStdGen, Random, newStdGen)
-import Control.Monad.Fix (MonadFix)
+import Control.Monad.Fix (MonadFix(mfix), fix)
 import Control.Monad (void, join)
-import Control.Monad.Writer (WriterT, tell, runWriterT, execWriterT)
+import Control.Monad.Writer (tell, runWriterT, Writer, WriterT)
 import Data.Functor ((<$), ($>))
 import Control.Monad.Trans (lift)
 import Data.Monoid (Sum(Sum, getSum))
-import Data.Map as Map (singleton, Map, insert, (!), fromList)
+import Data.Map as Map (singleton, Map, insert, (!), fromList, toList, filterWithKey, elems)
 import Control.Lens (Lens', (&), (.~))
 import Control.Lens.Iso(iso, Iso')
 import Data.Semigroup (Semigroup, (<>))
@@ -37,15 +44,21 @@ import GHCJS.DOM.Window (getLocalStorage)
 import GHCJS.DOM.Storage (setItem, getItem)
 import Foreign.JavaScript.TH(JSContextSingleton(..))
 import Reflex.TriggerEvent.Class(TriggerEvent)
+import Data.Aeson ()
+import Data.Traversable (sequence)
 
+--import Control.Monad.Freer.Writer (tell, runWriter, Writer)
+--import Control.Monad.Freer (send, Member, runM)
+--import Control.Monad.Freer.Internal  as Freer (Eff(Val, E), decomp, qApp, extract, tsingleton)
+--import Data.OpenUnion.Internal  as Union (inj)
 import Game.Clicker.Helper
 import Game.Clicker.Character
 
-makeCookie :: (MonadWidget t m) => [Dynamic t Price] -> m (Amount t)
+makeCookie :: (MonadWidget t m) => Dynamic t Price -> m (Amount t)
 makeCookie sums = getRet $ el' "div" $ do
   cookie_click <- button "Mani wheel"
   clicked <- count cookie_click
-  let cookie = foldl1 (zipDynWith (+)) $ clicked:sums
+  let cookie = zipDynWith (+) clicked sums
   display cookie
   el "div" $ dynText $ fmap (("manual: "<>). Text.pack . show) clicked
   return cookie
@@ -78,45 +91,102 @@ initialGame = fromList $
   ,("gambling_profit", 0)
   ]
 
-type GameT t m a = WriterT (Map.Map Text (Dynamic t Int)) (WriterT (Event t Text) m) a
+
+--data Fixable r a where
+--  MFix :: (a -> Fixable r a) -> Fixable r a
+--  LiftEff :: Eff r a -> Fixable r a
+--
+--instance (Member (Fixable r) r) => MonadFix (Eff r) where
+--  -- (a -> Eff r a) -> Eff r a
+--  mfix f = send (MFix (LiftEff . f))
+--
+--handleFixable :: Eff ('[Fixable ('[Widget ()]), Widget ()]) w -> Widget () w
+--handleFixable (Val x) = return x
+--handleFixable (Freer.E u q) =
+--  case decomp u of
+--       Right (MFix f) -> do
+--         a <- mfix (handleFixable . send . f)
+--         r <- handleFixable $ qApp q a
+--         return r
+--       Right (LiftEff e) -> runM $ e >>= (send . handleFixable . (qApp q))
+--       Left u' -> runM $ E u' (tsingleton (send . handleFixable . qApp q))
+
+
+newGame :: (MonadWidget t m) => Map Text Int -> m (Event t Int)
+newGame savedata = undefined
+
+initialSaveData :: Map Text Int
+initialSaveData = undefined
+
+-- (a, Dynamic t b) -> Dynamic t (a, b)
+constPairDyn :: Reflex t => (a, Dynamic t b) -> Dynamic t (a, b)
+constPairDyn (x, dyn) = zipDyn (constDyn x) dyn
+
+charasDynMap :: (Reflex t) => Map Text (Amount t, Dynamic t Price) -> Dynamic t (Map Text Int)
+charasDynMap name_and_dyn =
+  fmap Map.fromList
+    $ fmap concat $ distributeListOverDyn $ map (fmap toNameSpecAndDyn)
+      $ map constPairDyn
+        $ Map.toList
+          $ fmap (uncurry zipDyn) name_and_dyn
+  where
+    toNameSpecAndDyn :: (Text, (Int, Price)) -> [(Text, Int)]
+    toNameSpecAndDyn (name, (num, prof)) =
+      [(("number_" <> name), num), (("profit_" <> name), prof)]
 
 -- TODO: CpSの計算
-myWidget :: (MonadWidget t m, PerformEvent t m) => m (Amount t)
+myWidget :: Widget () (Amount Spider)
 myWidget = do
   -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
   -- ダブルクリック判定は、普通にクリック数をカウントして、一定時間経ったらリセットする
-
   wallTime <- timer
-
-  (cookie, log) <- runWriterT $ mdo
-    (onload :: Event t ()) <- lift getPostBuild
-    tell ("Welcome to Clicker.\n" <$ onload)
-    tell ("Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!\n" <$ onload)
-
-    cookie <- lift $ makeCookie [profit_grandma, profit_factory, profit_gambling]
-    profit_grandma <- lift $ grandma 0 cookie
-    profit_factory <- lift $ factory 0 cookie
-    profit_gambling <- gambling 0 cookie
-
-    return cookie
-
-  (logAcc::Event t Text) <- accum (<>) "" log
-  console <- textArea $ def
-    & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
-    & setValue .~ logAcc
 
   localstorage <- liftIO $ do
     window <- currentWindowUnchecked
     localstorage <- getLocalStorage window
     return localstorage
 
+  ((cookie::Amount Spider, savedata::Map Text (Dynamic Spider Int)), log::Event Spider Text) <- runWriterT $ runWriterT $ mdo
+
+    (onload :: Event Spider ()) <- lift $ lift $ (getPostBuild :: Widget () (Event Spider ()))
+    --tx <- lift $ fromMaybe (""::String) =<< (getItem localstorage ("savedata"::String))
+
+    lift $ tell (("Welcome to Clicker.\n"::Text) <$ onload)
+    lift $ tell (("Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!\n"::Text) <$ onload)
+
+    cookie <- lift $ lift $ makeCookie profs
+    (chara_dyn_map' :: Map Text (Dynamic Spider Int, Dynamic Spider Int)) <- sequence $ Map.fromList [
+      ("grandma", grandma 0 cookie)
+      ,("factory", factory 0 cookie)
+      ,("gambling", gambling 0 cookie)
+      ]
+
+    let
+      chara_dyn_map = charasDynMap chara_dyn_map'
+      profs = fmap (sum . Map.elems) $ fmap (Map.filterWithKey (\k x -> "profit" `Text.isPrefixOf` k)) chara_dyn_map
+
+    --(uniq_grandma, profit_grandma) <- grandma 0 cookie
+    --(uniq_factory, profit_factory) <- factory 0 cookie
+    --(uniq_gambling, profit_gambling) <- gambling 0 cookie
+
+    return cookie
+
+
+  (logAcc::Event Spider Text) <- accum (<>) "" log
+  console <- textArea $ def
+    & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
+    & setValue .~ logAcc
+
+
+  let savedataDyn = distributeMapOverDynPure savedata
+
   saved <- button "save"
-  performEvent $ ffor (tagPromptlyDyn cookie saved) $ \cookie -> liftIO $ do
-    setItem localstorage ("saveLocation"::String) $ Text.pack $ show cookie
+  performEvent $ ffor (tagPromptlyDyn savedataDyn saved) $ \savedata -> liftIO $ do
+    setItem localstorage ("savedata"::String) $ Text.pack $ show savedata
 
   recovered <- button "recover"
   savedata <- performEvent $ ffor recovered $ \() -> liftIO $ do
-    Just tx <- getItem localstorage ("saveLocation"::String)
+    Just tx <- getItem localstorage ("savedata"::String)
     return tx
 
   dynText =<< (holdDyn "" savedata)
@@ -132,6 +202,7 @@ myWidget = do
   -- 曜日ごとに儲かる
   -- 値上げ時間をちょっとあとにしたら? 連打まとめ買いでお得
   return cookie
+
 
 -- クッキーじゃなくて徳にすることも考えられる
 -- マニ車を回す的な
@@ -152,3 +223,4 @@ someFunc = mainWidgetWithHead' (headWidget, const myWidget)
 --
 -- (Monoid a, Monoid b) => Writer (a, b) x みたいにしても、ひとつずつtellすることはできないので、WriterDouble a b x みたいなのを作るか、WriterTを重ねるしかない?
 -- aとbの型が違えば、lift二回とかする必要は無いのだろうか?
+-- 押し続けると一定時間ごとに買える
