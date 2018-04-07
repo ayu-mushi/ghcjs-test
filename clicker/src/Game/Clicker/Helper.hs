@@ -36,6 +36,8 @@ import GHCJS.DOM.Storage (setItem, getItem)
 import Foreign.JavaScript.TH(JSContextSingleton(..))
 import Reflex.TriggerEvent.Class(TriggerEvent)
 
+type GameT t m a = WriterT (Event t Text) m a
+
 buttonDyn :: (DomBuilder t m, MonadWidget t m) => Dynamic t Text -> m (Event t ())
 buttonDyn t = do
   (e, _) <- el' "button" $ dynText t
@@ -78,9 +80,9 @@ buy priceDyn cookie buying =
   let isBuyable = (>=) <$> (current cookie) <*> (current priceDyn)
     in gate isBuyable buying
 
-buyDyn :: (MonadWidget t m) => Dynamic t Price -> Amount t -> Event t () -> m (Amount t)
-buyDyn priceDyn cookie buyEv = do
-  commodity <- count $ buy priceDyn cookie buyEv
+buyDyn :: (MonadWidget t m) => Int -> Dynamic t Price -> Amount t -> Event t () -> m (Amount t)
+buyDyn initalNum priceDyn cookie buyEv = do
+  commodity <- countDynFrom initalNum $ buy priceDyn cookie buyEv
   return commodity
 
 
@@ -120,3 +122,6 @@ workerView name p uniq profit = el' "div" $ do
 
 getRet :: Functor f => f (a, b) -> f b
 getRet = fmap snd
+
+countDynFrom :: (MonadWidget t m) => Int -> Event t a -> m(Dynamic t Int)
+countDynFrom n = foldDyn (\_ i -> succ i) n

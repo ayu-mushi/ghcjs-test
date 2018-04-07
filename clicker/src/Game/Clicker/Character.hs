@@ -46,21 +46,21 @@ import Reflex.Dom.Builder.Class (DomBuilderSpace)
 
 -- begin <workers>
 
-grandma :: (MonadWidget t m) => Price -> Amount t -> GameT t m (Amount t, Dynamic t Price)
-grandma initialProfit cookie = lift $ lift $ mdo
+grandma :: (MonadWidget t m) => Int -> Price -> Amount t -> GameT t m (Amount t, Dynamic t Price)
+grandma initialNum initialProfit cookie = lift $ mdo
   grandma_button <- getRet $ workerView "Grandma" grandma_price uniq_grandma profit_grandma
   grandma_price' <- delay 2 $ fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ updated $ uniq_grandma
   grandma_price <- holdDyn 20 grandma_price'
-  (uniq_grandma :: Amount t) <- buyDyn grandma_price cookie grandma_button
+  (uniq_grandma :: Amount t) <- buyDyn initialNum grandma_price cookie grandma_button
   mprofit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
   profit_grandma <- foldDyn (+) initialProfit mprofit_grandma
   return (uniq_grandma, profit_grandma)
 
-factory :: (MonadWidget t m) => Price -> Amount t -> GameT t m (Amount t, Dynamic t Price)
-factory initialProfit cookie = lift $ lift $ mdo
+factory :: (MonadWidget t m) => Int -> Price -> Amount t -> GameT t m (Amount t, Dynamic t Price)
+factory initialNum initialProfit cookie = lift $ mdo
   factory_button <- getRet $ workerView "factory" factory_price uniq_factory profit_factory
   let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
-  (uniq_factory :: Amount t) <- buyDyn factory_price cookie factory_button
+  (uniq_factory :: Amount t) <- buyDyn initialNum factory_price cookie factory_button
   mprofit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
   profit_factory <- foldDyn (+) initialProfit mprofit_factory
   return (uniq_factory, profit_factory)
@@ -88,41 +88,14 @@ gambleSeq ev = do
 
 -- type Widget x = PostBuildT Spider (ImmediateDomBuilderT Spider (WithJSContextSingleton x (PerformEventT Spider (SpiderHost Global))))
 
-gambling :: Price -> Amount Spider -> GameT Spider (Widget ()) (Amount Spider, Dynamic Spider Price) -- ギャンブル
-gambling initialProfit cookie = do
-  (mprofit_gambling, marginal_benefit, gambling_price_original, profit_gambling, results, uniq_gambling) <- lift $ lift (body :: Widget () (Event Spider Int, Event Spider Int, Dynamic Spider Price, Dynamic Spider Price, Event Spider Dice, Amount Spider))
-
-  let gamble_name (x::Int) | x == 10 = "You got Gold!(10% possibility)\n"
-                       | x < 10 && 6 < x = "You got Silver(40% possibility)\n"
-                       | otherwise = "You got Copper(50% possibility)\n"
-
--- "「銀」を三回獲得――スキル【強運】を開放します。"
-  tell (singleton ("gambling_profit"::Text) profit_gambling)
-  tell (singleton ("gambling_number"::Text) uniq_gambling)
-
-  firstDame <- lift $ lift $ (headE $ gate (current $ fmap ((-50) >=) profit_gambling) ("[破滅Lv1を開放しました]あなたは50以上のクッキーをギャンブルで失いました……賭け金はやればやるほど増えるから、もっとやれば取り返せるかも！がんばれ＞＜\n [Unlock the Vice named 'Ruin Lv.1'] ――You lost 50 cookie by gambling. Do your best!!!!!\n" <$ (updated cookie)) ::  Widget () (Event Spider Text))
-  lift $ tell firstDame
-
-  (numOfGold :: Dynamic Spider Int)<- lift $ lift $(count $ ffilter (==Gold) results :: Widget () (Dynamic Spider Int))
-  (luckyman :: Event Spider Text) <- lift $ lift $(headE $ gate (fmap (==3) $ current $ numOfGold) (("「金」を三回獲得――スキル【強運】を開放します。\n You have got three golds ――thus, unlock a Skill named 'Lucky'.\n"::Text) <$ (updated cookie)) :: Widget () (Event Spider Text))
-  lift $ tell luckyman
-
-  lift $ tell $ fmap gamblingResultStr results
-
-  let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)\n") (current gambling_price_original) marginal_benefit
-  lift $ tell gambling_log
-
-  return (uniq_gambling, profit_gambling)
-
-
- where
-   body :: MonadWidget Spider m1 => m1 (Event Spider Int, Event Spider Int, Dynamic Spider Price, Dynamic Spider Price, Event Spider Dice, Amount Spider)
-   body = mdo
+gambling :: (MonadWidget t m) => Int -> Price -> Amount t -> GameT t m (Amount t, Dynamic t Price) -- ギャンブル
+gambling initialNum initialProfit cookie = do
+  (mprofit_gambling, marginal_benefit, gambling_price_original, profit_gambling, results, uniq_gambling) <- lift $ mdo
     let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
     let gambling_price_original = gambling_price
     gambling_button <- getRet $ (workerView "gambling" gambling_price uniq_gambling profit_gambling)
-    (uniq_gambling :: Amount Spider)  <- buyDyn gambling_price cookie gambling_button
-    (results :: Event Spider Dice) <- gambleSeq $ updated $ void uniq_gambling
+    (uniq_gambling :: Amount t)  <- buyDyn initialNum gambling_price cookie gambling_button
+    (results :: Event t Dice) <- gambleSeq $ updated $ void uniq_gambling
 
     -- 限界クッキー
     let marginal_benefit = fmap (uncurry gamblePointing) $ attach (current gambling_price) results
@@ -130,6 +103,26 @@ gambling initialProfit cookie = do
     profit_gambling <- foldDyn (+) initialProfit mprofit_gambling
 
     return (mprofit_gambling, marginal_benefit, gambling_price_original, profit_gambling, results, uniq_gambling)
+
+  let gamble_name (x::Int) | x == 10 = "You got Gold!(10% possibility)\n"
+                       | x < 10 && 6 < x = "You got Silver(40% possibility)\n"
+                       | otherwise = "You got Copper(50% possibility)\n"
+
+-- "「銀」を三回獲得――スキル【強運】を開放します。"
+  firstDame <-  lift $ headE $ gate (current $ fmap ((-50) >=) profit_gambling) ("[破滅Lv1を開放しました]あなたは50以上のクッキーをギャンブルで失いました……賭け金はやればやるほど増えるから、もっとやれば取り返せるかも！がんばれ＞＜\n [Unlock the Vice named 'Ruin Lv.1'] ――You lost 50 cookie by gambling. Do your best!!!!!\n" <$ (updated cookie))
+  tell firstDame
+
+  (numOfGold :: Dynamic t Int)<- lift $count $ ffilter (==Gold) results
+  (luckyman :: Event t Text) <- lift $headE $ gate (fmap (==3) $ current $ numOfGold) (("「金」を三回獲得――スキル【強運】を開放します。\n You have got three golds ――thus, unlock a Skill named 'Lucky'.\n"::Text) <$ (updated cookie))
+  tell luckyman
+
+  tell $ fmap gamblingResultStr results
+
+  let gambling_log = attachWith (\price mb -> Text.pack $ "you get " <> show mb <> " cookies by gambling!(original cookies is: " <> show price <> "cookies)\n") (current gambling_price_original) marginal_benefit
+  tell gambling_log
+
+  return (uniq_gambling, profit_gambling)
+
 
 -- Dynamic t [a] -> [Dynamic t a]
 -- switch

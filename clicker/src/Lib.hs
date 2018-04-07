@@ -33,7 +33,7 @@ import Control.Monad.Writer (tell, runWriterT, Writer, WriterT)
 import Data.Functor ((<$), ($>))
 import Control.Monad.Trans (lift)
 import Data.Monoid (Sum(Sum, getSum))
-import Data.Map as Map (singleton, Map, insert, (!), fromList, toList, filterWithKey, elems)
+import Data.Map as Map (singleton, Map, insert, (!),fromList, toList, filterWithKey, elems)
 import Control.Lens (Lens', (&), (.~))
 import Control.Lens.Iso(iso, Iso')
 import Data.Semigroup (Semigroup, (<>))
@@ -54,14 +54,14 @@ import Data.Traversable (sequence)
 import Game.Clicker.Helper
 import Game.Clicker.Character
 
-makeCookie :: (MonadWidget t m) => Dynamic t Price -> m (Amount t)
-makeCookie sums = getRet $ el' "div" $ do
+makeCookie :: (MonadWidget t m) => Int -> Dynamic t Price -> m (Amount t, Dynamic t Price)
+makeCookie manual_pre sums = getRet $ el' "div" $ do
   cookie_click <- button "Mani wheel"
-  clicked <- count cookie_click
+  clicked <- countDynFrom manual_pre cookie_click
   let cookie = zipDynWith (+) clicked sums
   display cookie
   el "div" $ dynText $ fmap (("manual: "<>). Text.pack . show) clicked
-  return cookie
+  return (cookie, clicked)
 
 timer :: (MonadWidget t m) => m (Dynamic t Integer)
 timer = do
@@ -78,18 +78,7 @@ headWidget cookie = do
 
   where toTitle cookie = "(" <> (Text.pack $ show cookie) <> ") Clicker"
 
--- 読み込みは?
-initialGame :: Map.Map Text Int
-initialGame = fromList $
-  [("cookie_number", 0)
-  ,("pure-clicking_profit", 0)
-  ,("grandma_number", 0)
-  ,("grandma_profit", 0)
-  ,("factory_number", 0)
-  ,("factory_profit", 0)
-  ,("gambling_number", 0)
-  ,("gambling_profit", 0)
-  ]
+
 
 
 --data Fixable r a where
@@ -112,11 +101,46 @@ initialGame = fromList $
 --       Left u' -> runM $ E u' (tsingleton (send . handleFixable . qApp q))
 
 
-newGame :: (MonadWidget t m) => Map Text Int -> m (Event t Int)
-newGame savedata = undefined
+newGame :: (MonadWidget t m) => Event t () -> Map Text Int -> GameT t m (Amount t, Dynamic t (Map Text Int))
+newGame onload savedata = mdo
+  tell (("Welcome to Clicker.\n"::Text) <$ onload)
+  tell (("Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!\n"::Text) <$ onload)
 
+  (cookie, manual) <- lift $ makeCookie (savedata Map.! "manual") profs
+
+  let nameToChara "grandma" = grandma
+      nameToChara "factory" = factory
+      nameToChara "gambling" = gambling
+      getCharaFromSaved (name) =
+        (name,
+        nameToChara name (savedata Map.! ("number_"<>name))
+                         (savedata Map.! ("profit_"<>name))
+                         cookie)
+
+  (chara_dyn_map' :: Map Text (Dynamic t Int, Dynamic t Int)) <- sequence $ Map.fromList $map getCharaFromSaved [
+    ("grandma")
+    ,("factory")
+    ,("gambling")
+    ]
+
+  let
+    chara_dyn_map = (distributeMapOverDynPure $ singleton "manual" manual) `mappend` (charasDynMap chara_dyn_map')
+    profs = fmap (sum . Map.elems) $ fmap (Map.filterWithKey (\k x -> "profit" `Text.isPrefixOf` k)) chara_dyn_map
+
+  --(uniq_grandma, profit_grandma) <- grandma 0 cookie
+  --(uniq_factory, profit_factory) <- factory 0 cookie
+  --(uniq_gambling, profit_gambling) <- gambling 0 cookie
+
+  return (cookie, chara_dyn_map)
+
+-- 読み込みは?
 initialSaveData :: Map Text Int
-initialSaveData = undefined
+initialSaveData = Map.fromList
+  [("profit_grandma", 0), ("number_grandma", 0)
+  ,("profit_factory", 0), ("number_factory", 0)
+  ,("profit_gambling", 0), ("number_gambling", 0)
+  ,("manual", 0)
+  ]
 
 -- (a, Dynamic t b) -> Dynamic t (a, b)
 constPairDyn :: Reflex t => (a, Dynamic t b) -> Dynamic t (a, b)
@@ -135,7 +159,7 @@ charasDynMap name_and_dyn =
       [(("number_" <> name), num), (("profit_" <> name), prof)]
 
 -- TODO: CpSの計算
-myWidget :: Widget () (Amount Spider)
+myWidget :: (MonadWidget t m) => m (Amount t)
 myWidget = do
   -- ダブルクリック判定と同様の、連続で買われたかどうかの判定をすると良さそう
   -- ダブルクリック判定は、普通にクリック数をカウントして、一定時間経ったらリセットする
@@ -146,47 +170,31 @@ myWidget = do
     localstorage <- getLocalStorage window
     return localstorage
 
-  ((cookie::Amount Spider, savedata::Map Text (Dynamic Spider Int)), log::Event Spider Text) <- runWriterT $ runWriterT $ mdo
+  (previous_save_data :: Maybe (Map Text Int)) <- liftIO $ fmap read <$> getItem localstorage ("savedata"::String)
 
-    (onload :: Event Spider ()) <- lift $ lift $ (getPostBuild :: Widget () (Event Spider ()))
-    --tx <- lift $ fromMaybe (""::String) =<< (getItem localstorage ("savedata"::String))
+  ((cookie::Amount t, savedataDyn::Dynamic t (Map Text Int)), log::Event t Text) <- runWriterT $ do
+    (onload :: Event t ()) <- lift getPostBuild
+    (cookies, savedataDyn) <- newGame onload $ (fromMaybe initialSaveData previous_save_data) `mappend` initialSaveData
+    return (cookies, savedataDyn)
 
-    lift $ tell (("Welcome to Clicker.\n"::Text) <$ onload)
-    lift $ tell (("Grandma は 買ってから値上げまで2秒かかるのですばやく高速で買い上げると得!\n"::Text) <$ onload)
-
-    cookie <- lift $ lift $ makeCookie profs
-    (chara_dyn_map' :: Map Text (Dynamic Spider Int, Dynamic Spider Int)) <- sequence $ Map.fromList [
-      ("grandma", grandma 0 cookie)
-      ,("factory", factory 0 cookie)
-      ,("gambling", gambling 0 cookie)
-      ]
-
-    let
-      chara_dyn_map = charasDynMap chara_dyn_map'
-      profs = fmap (sum . Map.elems) $ fmap (Map.filterWithKey (\k x -> "profit" `Text.isPrefixOf` k)) chara_dyn_map
-
-    --(uniq_grandma, profit_grandma) <- grandma 0 cookie
-    --(uniq_factory, profit_factory) <- factory 0 cookie
-    --(uniq_gambling, profit_gambling) <- gambling 0 cookie
-
-    return cookie
-
-
-  (logAcc::Event Spider Text) <- accum (<>) "" log
+  (logAcc::Event t Text) <- accum (<>) "" log
   console <- textArea $ def
     & attributes .~ constDyn ("readonly" =: "readonly" <> "style" =: "width: 500px; height: 200px;")
     & setValue .~ logAcc
 
 
-  let savedataDyn = distributeMapOverDynPure savedata
-
   saved <- button "save"
   performEvent $ ffor (tagPromptlyDyn savedataDyn saved) $ \savedata -> liftIO $ do
     setItem localstorage ("savedata"::String) $ Text.pack $ show savedata
 
-  recovered <- button "recover"
+  cleared <- button "clear"
+  performEvent $ ffor cleared $ \() -> liftIO $ do
+    setItem localstorage ("savedata"::String) $ Text.pack $ show initialSaveData
+
+
+  recovered <- button "write to text"
   savedata <- performEvent $ ffor recovered $ \() -> liftIO $ do
-    Just tx <- getItem localstorage ("savedata"::String)
+    tx <- fromMaybe "No save data yet." <$> getItem localstorage ("savedata"::String)
     return tx
 
   dynText =<< (holdDyn "" savedata)
