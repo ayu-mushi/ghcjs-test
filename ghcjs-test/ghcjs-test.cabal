@@ -32,6 +32,8 @@ library
                      , text
                      , keycode
                      , stm
+                     , these
+                     , reflex
   default-language:    Haskell2010
 
 executable ghcjs-test-exe

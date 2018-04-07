@@ -4,13 +4,14 @@
 {-# LANGUAGE GADTs  #-}
 {-# LANGUAGE RecursiveDo  #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE JavaScriptFFI, InterruptibleFFI #-}
+{-# LANGUAGE JavaScriptFFI, InterruptibleFFI , LambdaCase#-}
 
 module Lib
     ( myMain
     ) where
 
 import GHCJS.Marshal.Pure (PFromJSVal(..))
+import Data.Monoid(Sum(Sum))
 import GHCJS.DOM (currentWindowUnchecked, currentDocumentUnchecked)
 import GHCJS.DOM.Document (createElement, getBody)
 import GHCJS.DOM.NonElementParentNode (getElementByIdUnchecked)
@@ -37,6 +38,7 @@ import Reflex.Dom as Reflex
   holdDyn, holdUniqDyn, EventName(Click), domEvent, foldDyn, mapDyn, El, tickLossy, TickInfo(_tickInfo_lastUTC, _tickInfo_n, _tickInfo_alreadyElapsed), Event, delay, count, Dynamic, ffilter, FunctorMaybe(fmapMaybe), keypress, display, leftmost, button, simpleList, webSocket, webSocketConfig_send,
   RawWebSocket(..), tag, current, setValue, value, textInputConfig_initialValue, foldDynM, mconcatDyn, combineDyn, attachPromptlyDynWith, zipDynWith, constant,
   sample, PushM, Reflex, updated, gate, DomBuilder)
+import Reflex.Class as Reflex (alignEventWithMaybe)
 import Control.Lens ((&), (.~))
 import Data.Map (fromList)
 import Text.Hamlet (shamlet)
@@ -47,6 +49,7 @@ import qualified Data.Text as Text(pack)
 import Web.KeyCode (Key(..))
 import Control.Monad.STM (retry, atomically)
 import Control.Concurrent.STM (newTVar, readTVar, writeTVar, modifyTVar)
+import Data.These (These(This, That, These))
 
 foreign import javascript unsafe "alert($1);" alert :: GHCJS.Types.JSString -> IO ()
 foreign import javascript interruptible "setTimeout($c, $1);" delayJS :: Int -> IO ()
@@ -151,6 +154,13 @@ buttonDyn t = do
   (e, _) <- el' "button" $ dynText t
   return $ domEvent Click e
 
+perSecond :: (MonadWidget t m, Monoid a) => Event t a -> m (Dynamic t a)
+perSecond ev = do
+  ct <- liftIO getCurrentTime
+
+  (tick::Event t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct)
+  foldDyn (\(m::Maybe a) (n::a) -> case m of { Nothing -> (mempty::a) ; Just a -> a `mappend` n}) mempty $ alignEventWithMaybe (\case This a -> Just (Just a); That _ -> Just Nothing; These _ _ -> Just Nothing) ev tick
+
 myWidget :: (MonadWidget t m) => m ()
 myWidget = do
   el "div" $ text $ Text.pack "Welcome to Reflex"
@@ -165,6 +175,12 @@ myWidget = do
     ct <- liftIO getCurrentTime
     (tick::Event t TickInfo) <- tickLossy 1 ct
     (holdDyn (0, ct) $ (\t -> (_tickInfo_n t, _tickInfo_lastUTC t)) <$> tick) & fmap (fmap $ Text.pack . show) >>= dynText
+
+
+  triple <- button "triple click!"
+  howmany_clicked_in_one_sec <- perSecond (fmap (const (Sum (1::Int))) triple)
+  (howmany_triple_clicked::Dynamic t Int) <- count $ gate (current $ fmap (== (Sum (3::Int))) howmany_clicked_in_one_sec) (updated $ howmany_clicked_in_one_sec)
+  display $ howmany_triple_clicked
 
   return ()
   where
