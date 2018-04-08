@@ -54,6 +54,9 @@ import Data.Traversable (sequence)
 import Game.Clicker.Helper
 import Game.Clicker.Character
 
+data Character = Grandma | Factory | Gambling
+data ActionTaken = Buy Character | CookieClick
+
 makeCookie :: (MonadWidget t m) => Int -> Dynamic t Price -> m (Amount t, Dynamic t Price)
 makeCookie manual_pre sums = getRet $ el' "div" $ do
   cookie_click <- button "Mani wheel"
@@ -125,13 +128,17 @@ newGame onload savedata = mdo
 
   let
     chara_dyn_map = (distributeMapOverDynPure $ singleton "manual" manual) `mappend` (charasDynMap chara_dyn_map')
-    profs = fmap (sum . Map.elems) $ fmap (Map.filterWithKey (\k x -> "profit" `Text.isPrefixOf` k)) chara_dyn_map
+    profs = fmap (sum . Map.elems) $ fmap getProfits chara_dyn_map
 
   --(uniq_grandma, profit_grandma) <- grandma 0 cookie
   --(uniq_factory, profit_factory) <- factory 0 cookie
   --(uniq_gambling, profit_gambling) <- gambling 0 cookie
 
   return (cookie, chara_dyn_map)
+
+getProfits, getNumbers :: Map Text a -> Map Text a
+getProfits = Map.filterWithKey (\k x -> "profit" `Text.isPrefixOf` k)
+getNumbers = Map.filterWithKey (\k x -> "number" `Text.isPrefixOf` k)
 
 -- 読み込みは?
 initialSaveData :: Map Text Int
@@ -158,6 +165,8 @@ charasDynMap name_and_dyn =
     toNameSpecAndDyn (name, (num, prof)) =
       [(("number_" <> name), num), (("profit_" <> name), prof)]
 
+-- TODO: Achivement
+-- TODO: 行動選択イベントストリーム ActionTaken
 -- TODO: CpSの計算
 myWidget :: (MonadWidget t m) => m (Amount t)
 myWidget = do
@@ -183,21 +192,23 @@ myWidget = do
     & setValue .~ logAcc
 
 
-  saved <- button "save"
-  performEvent $ ffor (tagPromptlyDyn savedataDyn saved) $ \savedata -> liftIO $ do
-    setItem localstorage ("savedata"::String) $ Text.pack $ show savedata
+  el "div" $ do
+    saved <- button "save"
+    performEvent $ ffor (tagPromptlyDyn savedataDyn saved) $ \savedata -> liftIO $ do
+      setItem localstorage ("savedata"::String) $ Text.pack $ show savedata
 
-  cleared <- button "clear"
-  performEvent $ ffor cleared $ \() -> liftIO $ do
-    setItem localstorage ("savedata"::String) $ Text.pack $ show initialSaveData
+    cleared <- button "clear"
+    performEvent $ ffor cleared $ \() -> liftIO $ do
+      setItem localstorage ("savedata"::String) $ Text.pack $ show initialSaveData
 
 
-  recovered <- button "write to text"
-  savedata <- performEvent $ ffor recovered $ \() -> liftIO $ do
-    tx <- fromMaybe "No save data yet." <$> getItem localstorage ("savedata"::String)
-    return tx
+    recovered <- button "write to text"
+    savedata <- performEvent $ ffor recovered $ \() -> liftIO $ do
+      tx <- fromMaybe "No save data yet." <$> getItem localstorage ("savedata"::String)
+      return tx
 
-  dynText =<< (holdDyn "" savedata)
+    dynText =<< (holdDyn "" savedata)
+    return ()
   -- 投資、資本
   -- 借金、ギャンブル、リスク
   -- 破産
@@ -209,6 +220,7 @@ myWidget = do
   -- 運をお金で買う
   -- 曜日ごとに儲かる
   -- 値上げ時間をちょっとあとにしたら? 連打まとめ買いでお得
+
   return cookie
 
 
@@ -232,3 +244,4 @@ someFunc = mainWidgetWithHead' (headWidget, const myWidget)
 -- (Monoid a, Monoid b) => Writer (a, b) x みたいにしても、ひとつずつtellすることはできないので、WriterDouble a b x みたいなのを作るか、WriterTを重ねるしかない?
 -- aとbの型が違えば、lift二回とかする必要は無いのだろうか?
 -- 押し続けると一定時間ごとに買える
+-- ロードした後グランマの値段が20になってしまう

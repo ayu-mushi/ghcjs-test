@@ -1,7 +1,7 @@
 {-# LANGUAGE JavaScriptFFI, InterruptibleFFI #-}
 {-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE RecursiveDo, Rank2Types#-}
+{-# LANGUAGE RecursiveDo, Rank2Types, LambdaCase#-}
 module Game.Clicker.Helper where
 
 import Reflex.Dom as Reflex
@@ -11,7 +11,8 @@ import Reflex.Dom as Reflex
   Reflex, updated, gate, DomBuilder, splitE,
   MonadHold, hold, tagPromptlyDyn, textArea, textArea_value, TextArea, attributes, constDyn, (=:), textAreaConfig_initialValue, attach, attachWith, getPostBuild, PostBuild, attachWidget, askJSContext, performEvent, ffor, PerformEvent, Performable)
 import Reflex.Dom.Main (Widget, mainWidgetWithHead, mainWidgetWithHead')
-import Reflex.Class (accum, Dynamic, Event, Behavior, headE)
+import Reflex.Class (accum, Dynamic, Event, Behavior, headE, alignEventWithMaybe)
+import Data.These (These(This, That, These))
 import Reflex.Spider (SpiderTimeline, Global, Spider)
 import qualified Data.Text as Text(pack, lines, unlines)
 import Data.Time.Clock (getCurrentTime, UTCTime, diffUTCTime, NominalDiffTime)
@@ -112,12 +113,14 @@ data PriceSeq = PriceSeq {
   }
 
 -- View Side in Model and View
-workerView :: (DomBuilder t m, MonadWidget t m) => Text -> Dynamic t Int -> Dynamic t Price -> Dynamic t Price -> m (El t, Event t ())
-workerView name p uniq profit = el' "div" $ do
+workerView :: (DomBuilder t m, MonadWidget t m) => Text -> Dynamic t Int -> Dynamic t Price -> Dynamic t Price -> Event t Price -> m (El t, Event t ())
+workerView name p uniq profit mprofit = el' "div" $ do
   text name
   button <- buttonDyn $ fmap (\price -> "buy " <> name <> " ($"<> (Text.pack $ show price) <>" cookies)") p
   dynText $ fmap (\n -> Text.pack $ "数:" <> show n <> "匹います！") uniq
   dynText $ fmap (\prof -> Text.pack $ "総利潤: " <> show prof <> "だよ☆") profit
+  mprofit_dyn <- (holdDyn 0 mprofit)
+  dynText $ (fmap (\prof -> Text.pack $ "現刹那当たり利潤" <> show prof <> "だよ☆")) mprofit_dyn
   return button
 
 getRet :: Functor f => f (a, b) -> f b
@@ -125,3 +128,10 @@ getRet = fmap snd
 
 countDynFrom :: (MonadWidget t m) => Int -> Event t a -> m(Dynamic t Int)
 countDynFrom n = foldDyn (\_ i -> succ i) n
+
+perSecond :: (MonadWidget t m, Monoid a) => Event t a -> m (Dynamic t a)
+perSecond ev = do
+  ct <- liftIO getCurrentTime
+
+  (tick::Event t Integer) <- (fmap (fmap _tickInfo_n) $ tickLossy 1 ct)
+  foldDyn (\(m::Maybe a) (n::a) -> case m of { Nothing -> (mempty::a) ; Just a -> a `mappend` n}) mempty $ alignEventWithMaybe (\case This a -> Just (Just a); That _ -> Just Nothing; These _ _ -> Just Nothing) ev tick

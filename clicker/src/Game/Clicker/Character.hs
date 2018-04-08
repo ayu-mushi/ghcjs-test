@@ -48,9 +48,9 @@ import Reflex.Dom.Builder.Class (DomBuilderSpace)
 
 grandma :: (MonadWidget t m) => Int -> Price -> Amount t -> GameT t m (Amount t, Dynamic t Price)
 grandma initialNum initialProfit cookie = lift $ mdo
-  grandma_button <- getRet $ workerView "Grandma" grandma_price uniq_grandma profit_grandma
+  grandma_button <- getRet $ workerView "Grandma" grandma_price uniq_grandma profit_grandma mprofit_grandma
   grandma_price' <- delay 2 $ fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ updated $ uniq_grandma
-  grandma_price <- holdDyn 20 grandma_price'
+  grandma_price <- holdDyn (floor $ (20.0::Float) * ((1.15::Float) ^ initialNum) ) grandma_price'
   (uniq_grandma :: Amount t) <- buyDyn initialNum grandma_price cookie grandma_button
   mprofit_grandma <- profit uniq_grandma (const :: Int -> NominalDiffTime -> Int) 1 grandma_price
   profit_grandma <- foldDyn (+) initialProfit mprofit_grandma
@@ -58,7 +58,7 @@ grandma initialNum initialProfit cookie = lift $ mdo
 
 factory :: (MonadWidget t m) => Int -> Price -> Amount t -> GameT t m (Amount t, Dynamic t Price)
 factory initialNum initialProfit cookie = lift $ mdo
-  factory_button <- getRet $ workerView "factory" factory_price uniq_factory profit_factory
+  factory_button <- getRet $ workerView "factory" factory_price uniq_factory profit_factory mprofit_factory
   let factory_price = fmap (\n -> floor $ (50.0::Float) * ((1.15::Float) ^ n)) uniq_factory
   (uniq_factory :: Amount t) <- buyDyn initialNum factory_price cookie factory_button
   mprofit_factory <- profit uniq_factory (\n _ -> 10 * n) 3 factory_price
@@ -93,7 +93,7 @@ gambling initialNum initialProfit cookie = do
   (mprofit_gambling, marginal_benefit, gambling_price_original, profit_gambling, results, uniq_gambling) <- lift $ mdo
     let gambling_price = fmap (\n -> floor $ (20.0::Float) * ((1.15::Float) ^ n)) $ uniq_gambling
     let gambling_price_original = gambling_price
-    gambling_button <- getRet $ (workerView "gambling" gambling_price uniq_gambling profit_gambling)
+    gambling_button <- getRet $ (workerView "gambling" gambling_price uniq_gambling profit_gambling mprofit_gambling)
     (uniq_gambling :: Amount t)  <- buyDyn initialNum gambling_price cookie gambling_button
     (results :: Event t Dice) <- gambleSeq $ updated $ void uniq_gambling
 
