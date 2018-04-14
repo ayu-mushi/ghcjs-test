@@ -113,7 +113,7 @@ gambling initialNum initialProfit cookie = do
   tell firstDame
 
   (numOfGold :: Dynamic t Int)<- lift $count $ ffilter (==Gold) results
-  (luckyman :: Event t Text) <- lift $headE $ gate (fmap (==3) $ current $ numOfGold) (("「金」を三回獲得――スキル【強運】を開放します。\n You have got three golds ――thus, unlock a Skill named 'Lucky'.\n"::Text) <$ (updated cookie))
+  (luckyman :: Event t Text) <- lift $headE $ gate (fmap (==3) $ current $ numOfGold) (("「金」を三回獲得――スキル【強運】を開放します。\n You have given three golds ――thus, unlock a Skill named 'Lucky'.\n"::Text) <$ (updated cookie))
   tell luckyman
 
   tell $ fmap gamblingResultStr results
