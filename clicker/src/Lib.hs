@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE JavaScriptFFI, InterruptibleFFI #-}
 
 module Lib
     ( someFunc
@@ -28,7 +29,7 @@ import Data.Maybe (fromMaybe)
 import Control.Monad.IO.Class (liftIO)
 import System.Random (randomR, mkStdGen, Random, newStdGen)
 import Control.Monad.Fix (MonadFix(mfix), fix)
-import Control.Monad (void, join)
+import Control.Monad (void, join, when)
 import Control.Monad.Writer (tell, runWriterT, Writer, WriterT)
 import Data.Functor ((<$), ($>))
 import Control.Monad.Trans (lift)
@@ -39,13 +40,14 @@ import Control.Lens.Iso(iso, Iso')
 import Data.Semigroup (Semigroup, (<>))
 import GHCJS.DOM.Document(getHeadUnsafe)
 import GHCJS.DOM (currentWindowUnchecked, currentDocumentUnchecked)
-import GHCJS.DOM.Types (toElement)
+import GHCJS.DOM.Types (toElement, JSString)
 import GHCJS.DOM.Window (getLocalStorage)
 import GHCJS.DOM.Storage (setItem, getItem)
 import Foreign.JavaScript.TH(JSContextSingleton(..))
 import Reflex.TriggerEvent.Class(TriggerEvent)
 import Data.Aeson ()
 import Data.Traversable (sequence)
+import qualified Data.JSString as JSString (pack)
 
 --import Control.Monad.Freer.Writer (tell, runWriter, Writer)
 --import Control.Monad.Freer (send, Member, runM)
@@ -53,6 +55,10 @@ import Data.Traversable (sequence)
 --import Data.OpenUnion.Internal  as Union (inj)
 import Game.Clicker.Helper
 import Game.Clicker.Character
+
+foreign import javascript unsafe "Push.Permission.request();" pushPermReq :: IO ()
+foreign import javascript unsafe "Push.create($1);" pushNotify :: JSString -> IO ()
+foreign import javascript unsafe "Push.Permission.has()" isPushPerm :: IO Bool
 
 data Character = Grandma | Factory | Gambling
 data ActionTaken = Buy Character | CookieClick
@@ -77,6 +83,7 @@ timer = do
 headWidget :: (MonadWidget t m) => Amount t -> m ()
 headWidget cookie = do
   el "title" $ dynText $ fmap toTitle cookie
+  elAttr "script" (Map.fromList [("src", "https://cdnjs.cloudflare.com/ajax/libs/push.js/0.0.11/push.min.js")]) $ return ()
   return ()
 
   where toTitle cookie = "(" <> (Text.pack $ show cookie) <> ") Clicker"
@@ -207,6 +214,15 @@ myWidget = do
       tx <- fromMaybe "No save data yet." <$> getItem localstorage ("savedata"::String)
       return tx
 
+    pushPermReq_click <- button "pushPermReq"
+    performEvent $ ffor pushPermReq_click $ const $ liftIO $ pushPermReq
+
+    pushCli <- button "push"
+    performEvent $ ffor (gate (current $ fmap ((==0) . (`mod` 10)) cookie) $ updated cookie) $ \n -> do
+      b <- liftIO isPushPerm
+      when b $ liftIO $ pushNotify $ JSString.pack $ show n
+      liftIO $ putStrLn "aaa"
+
     dynText =<< (holdDyn "" savedata)
     return ()
   -- 投資、資本
@@ -233,7 +249,8 @@ myWidget = do
 
 
 someFunc :: IO ()
-someFunc = mainWidgetWithHead' (headWidget, const myWidget)
+someFunc = do
+  mainWidgetWithHead' (headWidget, const myWidget)
 
 -- 経過時間と生産力からクッキーの量を導出
 -- 設備の量が途中で変わる場合はどうする
@@ -244,4 +261,4 @@ someFunc = mainWidgetWithHead' (headWidget, const myWidget)
 -- (Monoid a, Monoid b) => Writer (a, b) x みたいにしても、ひとつずつtellすることはできないので、WriterDouble a b x みたいなのを作るか、WriterTを重ねるしかない?
 -- aとbの型が違えば、lift二回とかする必要は無いのだろうか?
 -- 押し続けると一定時間ごとに買える
--- ロードした後グランマの値段が20になってしまう
+-- ロードした後グランマの値段が20になってしまう→解決済み
